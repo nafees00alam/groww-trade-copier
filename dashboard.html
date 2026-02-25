@@ -1,0 +1,2204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Groww Trade Copier</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-primary: #0B0E11;
+  --bg-secondary: #1E2329;
+  --bg-card: #181C22;
+  --bg-card-hover: #1E2329;
+  --border: #2B3139;
+  --border-light: #363D47;
+  --text-primary: #EAECEF;
+  --text-secondary: #848E9C;
+  --text-muted: #5E6673;
+  --green: #00C087;
+  --green-dim: rgba(0,192,135,.12);
+  --red: #F6465D;
+  --red-dim: rgba(246,70,93,.12);
+  --blue: #2962FF;
+  --blue-dim: rgba(41,98,255,.12);
+  --cyan: #00B8D9;
+  --yellow: #FCD535;
+  --yellow-dim: rgba(252,213,53,.12);
+}
+
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+/* ── Header ── */
+.header {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.header-left { display: flex; align-items: center; gap: 16px; }
+.logo {
+  font-size: 18px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--cyan), var(--blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.status-badge.running {
+  background: var(--green-dim);
+  color: var(--green);
+}
+.status-badge.stopped {
+  background: var(--red-dim);
+  color: var(--red);
+}
+.status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.status-badge.running .status-dot {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 currentColor; }
+  50% { opacity: .6; box-shadow: 0 0 8px 2px currentColor; }
+}
+
+.uptime { font-size: 12px; color: var(--text-secondary); font-family: 'JetBrains Mono', monospace; }
+
+.header-right { display: flex; align-items: center; gap: 12px; }
+.btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn:active { transform: scale(.97); }
+.btn-green { background: var(--green); color: #000; }
+.btn-green:hover { background: #00d694; }
+.btn-red { background: var(--red); color: #fff; }
+.btn-red:hover { background: #ff5c72; }
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover { background: var(--bg-card); color: var(--text-primary); border-color: var(--border-light); }
+.btn-icon {
+  width: 36px; height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all .15s;
+}
+.btn-icon:hover { background: var(--bg-card); color: var(--text-primary); }
+
+/* ── Main Layout ── */
+.main { padding: 20px 24px; max-width: 1600px; margin: 0 auto; }
+
+/* ── Stats Bar ── */
+.stats-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  transition: border-color .2s;
+}
+.stat-card:hover { border-color: var(--border-light); }
+.stat-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 6px;
+}
+.stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+.stat-value.green { color: var(--green); }
+.stat-value.red { color: var(--red); }
+.stat-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* ── Market Indices ── */
+.indices-section { margin-bottom: 20px; }
+.indices-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.indices-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.indices-toggle {
+  font-size: 11px;
+  color: var(--cyan);
+  cursor: pointer;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 10px;
+  transition: all .2s;
+}
+.indices-toggle:hover { background: var(--blue-dim); border-color: var(--cyan); }
+.indices-header .spacer { flex: 1; }
+.indices-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+.index-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  transition: border-color .2s, transform .15s, box-shadow .2s;
+  cursor: default;
+  position: relative;
+  overflow: hidden;
+}
+.index-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+}
+.index-card.up::before { background: linear-gradient(90deg, var(--green), transparent); }
+.index-card.down::before { background: linear-gradient(90deg, var(--red), transparent); }
+.index-card.flat::before { background: linear-gradient(90deg, var(--text-muted), transparent); }
+.index-card:hover { border-color: var(--border-light); transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+.index-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+.index-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.index-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.index-change {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.index-change.up { color: var(--green); background: var(--green-dim); }
+.index-change.down { color: var(--red); background: var(--red-dim); }
+.index-change.flat { color: var(--text-muted); }
+.index-ohlc {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.index-ohlc-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.index-ohlc-col:last-child { padding-left: 10px; border-left: 1px solid var(--border); }
+.index-ohlc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.index-ohlc-label {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.index-ohlc-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.indices-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 16px;
+  text-align: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* ── Account Cards ── */
+.accounts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.account-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  transition: border-color .2s;
+}
+.account-card:hover { border-color: var(--border-light); }
+.account-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.account-name { font-size: 14px; font-weight: 600; }
+.account-badge {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.badge-master { background: var(--blue-dim); color: var(--blue); }
+.badge-follower { background: var(--yellow-dim); color: var(--yellow); }
+.badge-offline { background: var(--red-dim); color: var(--red); }
+.account-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+.account-row-label { font-size: 12px; color: var(--text-secondary); }
+.account-row-value { font-size: 13px; font-family: 'JetBrains Mono', monospace; font-weight: 500; }
+.lot-mult { color: var(--cyan); }
+
+/* ── Lot Mode Selector ── */
+.lot-mode-group {
+  display: flex;
+  gap: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.lot-mode-btn {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+}
+.lot-mode-btn:not(:last-child) {
+  border-right: 1px solid var(--border);
+}
+.lot-mode-btn.active {
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+.lot-mode-btn:hover:not(.active) {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+/* ── Panels / Tables ── */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+@media (max-width: 1100px) { .grid-2 { grid-template-columns: 1fr; } }
+
+.panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.panel-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.panel-title { font-size: 14px; font-weight: 600; }
+.panel-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-primary);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.panel-body { max-height: 400px; overflow-y: auto; }
+
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+}
+tbody td {
+  padding: 10px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(43,49,57,.5);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+}
+tbody tr { transition: background .1s; }
+tbody tr:hover { background: rgba(255,255,255,.02); }
+tbody tr:last-child td { border-bottom: none; }
+
+.buy { color: var(--green); }
+.sell { color: var(--red); }
+.pnl-pos { color: var(--green); }
+.pnl-neg { color: var(--red); }
+
+.empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── Copy Log ── */
+.log-panel { margin-bottom: 20px; }
+.log-entry {
+  padding: 8px 18px;
+  border-bottom: 1px solid rgba(43,49,57,.4);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  animation: fadeIn .3s ease;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.log-time { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; min-width: 65px; }
+.log-status {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.log-status.success { background: var(--green); }
+.log-status.error { background: var(--red); }
+.log-status.warning { background: var(--yellow); }
+.log-status.info { background: var(--cyan); }
+.log-event { color: var(--text-primary); flex: 1; }
+.log-detail { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+
+/* ── Settings Panel ── */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .25s;
+}
+.settings-overlay.open { opacity: 1; pointer-events: all; }
+.settings-panel {
+  position: fixed;
+  top: 0; right: 0;
+  width: min(520px, 95vw);
+  height: 100vh;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  z-index: 201;
+  transform: translateX(100%);
+  transition: transform .3s cubic-bezier(.4,0,.2,1);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.settings-overlay.open .settings-panel { transform: translateX(0); }
+.settings-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.settings-header h2 { font-size: 16px; font-weight: 600; }
+.settings-body { padding: 24px; flex: 1; overflow-y: auto; }
+
+.form-section { margin-bottom: 24px; }
+.form-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.form-group { margin-bottom: 12px; }
+.form-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+}
+.form-input {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+  transition: border-color .15s;
+}
+.form-input:focus { outline: none; border-color: var(--blue); }
+.form-input::placeholder { color: var(--text-muted); }
+
+.form-row { display: flex; gap: 12px; }
+.form-row > * { flex: 1; }
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+.toggle-label { font-size: 13px; }
+.toggle {
+  width: 40px; height: 22px;
+  background: var(--border);
+  border-radius: 11px;
+  position: relative;
+  cursor: pointer;
+  transition: background .2s;
+}
+.toggle.on { background: var(--green); }
+.toggle::after {
+  content: '';
+  width: 16px; height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  position: absolute;
+  top: 3px; left: 3px;
+  transition: transform .2s;
+}
+.toggle.on::after { transform: translateX(18px); }
+
+.follower-card-settings {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.follower-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.follower-card-header span { font-size: 14px; font-weight: 600; }
+.btn-delete {
+  background: var(--red-dim);
+  color: var(--red);
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.btn-delete:hover { background: var(--red); color: #fff; }
+
+.password-wrap {
+  position: relative;
+}
+.password-wrap .form-input { padding-right: 36px; }
+.reveal-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px;
+}
+.reveal-btn:hover { color: var(--text-primary); }
+
+/* ── Settings Accordion ── */
+.settings-accordion {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+.accordion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  cursor: pointer;
+  user-select: none;
+  transition: background .15s;
+}
+.accordion-header:hover { background: rgba(255,255,255,.03); }
+.accordion-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.accordion-chevron {
+  font-size: 14px;
+  color: var(--text-muted);
+  transition: transform .25s ease;
+}
+.settings-accordion.open .accordion-chevron { transform: rotate(90deg); }
+.accordion-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height .3s ease;
+}
+.settings-accordion.open .accordion-body {
+  max-height: 2000px;
+}
+.accordion-body-inner {
+  padding: 0 16px 16px;
+}
+
+/* ── Toast ── */
+.toast-container {
+  position: fixed;
+  top: 70px;
+  right: 24px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  pointer-events: all;
+  animation: toastIn .3s ease, toastOut .3s ease 2.7s forwards;
+  box-shadow: 0 4px 16px rgba(0,0,0,.4);
+}
+.toast.success { background: var(--green); color: #000; }
+.toast.error { background: var(--red); color: #fff; }
+.toast.info { background: var(--blue); color: #fff; }
+@keyframes toastIn { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:translateX(0); } }
+@keyframes toastOut { from { opacity:1; } to { opacity:0; transform:translateY(-10px); } }
+
+/* ── WS Reconnect Banner ── */
+.ws-banner {
+  position: fixed;
+  top: 57px;
+  left: 0; right: 0;
+  z-index: 150;
+  text-align: center;
+  padding: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--yellow-dim);
+  color: var(--yellow);
+  border-bottom: 1px solid var(--yellow);
+  display: none;
+}
+
+/* ── Filter Input ── */
+.filter-input {
+  padding: 5px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  width: 140px;
+  transition: border-color .15s;
+}
+.filter-input:focus { outline: none; border-color: var(--blue); }
+.filter-input::placeholder { color: var(--text-muted); }
+
+/* ── Export Button ── */
+.btn-export {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: 11px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all .15s;
+}
+.btn-export:hover { background: var(--bg-card); color: var(--text-primary); border-color: var(--border-light); }
+
+/* ── Mobile hamburger ── */
+.hamburger {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 4px;
+}
+.mobile-menu {
+  display: none;
+  position: fixed;
+  top: 57px;
+  right: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 0 0 0 10px;
+  padding: 12px 16px;
+  z-index: 150;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+.mobile-menu.open { display: flex; }
+
+/* ── Last Updated ── */
+.last-updated {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ── Sound Toggle ── */
+.sound-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all .15s;
+  line-height: 1;
+}
+.sound-toggle.on { color: var(--yellow); border-color: var(--yellow); }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .header { padding: 12px 16px; }
+  .main { padding: 16px; }
+  .accounts-grid { grid-template-columns: 1fr; }
+  .stats-bar { grid-template-columns: repeat(2, 1fr); }
+  .header-right > *:not(.hamburger):not(.user-info) { display: none !important; }
+  .hamburger { display: block; }
+  .user-info { border: none; padding: 0; }
+  .user-info .user-name, .user-info .user-role { display: none; }
+}
+/* ── Login Page ── */
+.login-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 24px;
+}
+.login-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 48px 40px;
+  text-align: center;
+  max-width: 420px;
+  width: 90%;
+}
+.login-logo {
+  font-size: 24px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--cyan), var(--blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 8px;
+}
+.login-subtitle {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-bottom: 32px;
+}
+.login-steps {
+  text-align: left;
+  margin-bottom: 28px;
+}
+.login-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.login-step-num {
+  width: 24px; height: 24px;
+  background: var(--blue-dim);
+  color: var(--blue);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.login-bot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  background: #2AABEE;
+  color: #fff;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 14px;
+  transition: background .15s;
+}
+.login-bot-link:hover { background: #1d9bd1; }
+.login-waiting {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 16px;
+}
+
+/* ── User Info in Header ── */
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+.user-name { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.user-role {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.user-role.master { background: var(--blue-dim); color: var(--blue); }
+.user-role.follower { background: var(--yellow-dim); color: var(--yellow); }
+.btn-logout {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all .15s;
+}
+.btn-logout:hover { background: var(--red-dim); color: var(--red); border-color: var(--red); }
+
+/* ── Follower Names List (Master view) ── */
+.follower-names-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+}
+.follower-names-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.follower-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(43,49,57,.4);
+}
+.follower-name-row:last-child { border-bottom: none; }
+.fn-name { font-size: 13px; font-weight: 500; }
+.fn-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.fn-status.online { background: var(--green-dim); color: var(--green); }
+.fn-status.offline { background: var(--red-dim); color: var(--red); }
+.fn-mult { font-size: 12px; color: var(--cyan); font-family: 'JetBrains Mono', monospace; }
+
+</style>
+</head>
+<body>
+
+<!-- Login Page (shown when not authenticated) -->
+<div id="loginPage" class="login-page" style="display:none">
+  <div class="login-card">
+    <div class="login-logo">Groww Trade Copier</div>
+    <div class="login-subtitle">Authenticate via Telegram to access the dashboard</div>
+    <div class="login-steps">
+      <div class="login-step">
+        <span class="login-step-num">1</span>
+        <span>Open the bot in Telegram</span>
+      </div>
+      <div class="login-step">
+        <span class="login-step-num">2</span>
+        <span>Send <code style="background:var(--bg-primary);padding:2px 6px;border-radius:4px;font-family:'JetBrains Mono',monospace">/login</code> to get a unique login link</span>
+      </div>
+      <div class="login-step">
+        <span class="login-step-num">3</span>
+        <span>Click the link — you'll be logged in automatically</span>
+      </div>
+    </div>
+    <a id="botLink" class="login-bot-link" href="#" target="_blank">
+      Open Telegram Bot
+    </a>
+    <div class="login-waiting">Your session will persist for 7 days</div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+<!-- WS reconnect banner -->
+<div class="ws-banner" id="wsBanner">Reconnecting to live feed...</div>
+
+<!-- Dashboard (shown when authenticated) -->
+<div id="dashboardApp" style="display:none">
+
+<!-- Header -->
+<header class="header">
+  <div class="header-left">
+    <span class="logo">Groww Trade Copier</span>
+    <div id="statusBadge" class="status-badge stopped">
+      <span class="status-dot"></span>
+      <span id="statusText">Stopped</span>
+    </div>
+    <span class="uptime" id="uptime"></span>
+  </div>
+  <div class="header-right">
+    <a id="oiLink" href="/oi" style="display:none;font-size:12px;font-weight:600;color:var(--cyan);text-decoration:none;padding:6px 14px;border:1px solid var(--border);border-radius:6px;transition:all .15s" onmouseover="this.style.background='var(--blue-dim)';this.style.borderColor='var(--cyan)'" onmouseout="this.style.background='';this.style.borderColor='var(--border)'">OI Analytics</a>
+    <span id="masterControls" style="display:none">
+      <button class="btn btn-green" id="startBtn" onclick="startCopier()">Start</button>
+      <button class="btn btn-red" id="stopBtn" onclick="stopCopier()" style="display:none">Stop</button>
+      <button class="btn btn-ghost" id="dryRunBtn" onclick="toggleDryRun()" title="Toggle dry run mode">Dry Run: ON</button>
+    </span>
+    <button class="sound-toggle" id="soundToggle" onclick="toggleSound()" title="Sound alerts">&#x1f508;</button>
+    <button class="btn-icon" onclick="refreshAll()" title="Refresh">&#x21bb;</button>
+    <button class="btn-icon" onclick="openSettings()" title="Settings">&#x2699;</button>
+    <button class="hamburger" onclick="toggleMobileMenu()">&#x2630;</button>
+    <div class="user-info">
+      <span class="user-name" id="userName"></span>
+      <span class="user-role" id="userRole"></span>
+      <button class="btn-logout" onclick="logout()">Logout</button>
+    </div>
+  </div>
+</header>
+
+<!-- Mobile Menu -->
+<div class="mobile-menu" id="mobileMenu">
+  <span id="masterControlsMobile" style="display:none">
+    <button class="btn btn-green" style="width:100%" onclick="startCopier();toggleMobileMenu()">Start</button>
+    <button class="btn btn-red" style="width:100%" onclick="stopCopier();toggleMobileMenu()">Stop</button>
+    <button class="btn btn-ghost" style="width:100%" onclick="toggleDryRun();toggleMobileMenu()">Dry Run</button>
+  </span>
+  <button class="btn btn-ghost" style="width:100%" onclick="toggleSound();toggleMobileMenu()">Toggle Sound</button>
+  <button class="btn btn-ghost" style="width:100%" onclick="refreshAll();toggleMobileMenu()">Refresh</button>
+  <button class="btn btn-ghost" style="width:100%" onclick="openSettings();toggleMobileMenu()">Settings</button>
+  <button class="btn btn-ghost" style="width:100%;color:var(--red)" onclick="logout()">Logout</button>
+</div>
+
+<!-- Main -->
+<div class="main">
+
+  <!-- Stats Bar (master only) -->
+  <div class="stats-bar" id="statsBar" style="display:none">
+    <div class="stat-card">
+      <div class="stat-label">Orders Copied</div>
+      <div class="stat-value" id="statCopied">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Success Rate</div>
+      <div class="stat-value green" id="statRate">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Active Followers</div>
+      <div class="stat-value" id="statFollowers">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Failed Copies</div>
+      <div class="stat-value red" id="statFailed">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Unrealized P&amp;L</div>
+      <div class="stat-value" id="statPnl">-</div>
+      <div class="stat-sub last-updated" id="pnlUpdated"></div>
+    </div>
+  </div>
+
+  <!-- Market Indices -->
+  <div class="indices-section">
+    <div class="indices-header">
+      <span class="indices-title">Market Indices</span>
+      <button class="indices-toggle" id="indicesToggle" onclick="toggleIndicesExpand()">Show All</button>
+      <span class="spacer"></span>
+      <span style="font-size:11px;color:var(--text-muted)" id="indicesTime">--</span>
+    </div>
+    <div class="indices-grid" id="indicesGrid">
+      <div class="indices-empty">Connecting to market feed...</div>
+    </div>
+  </div>
+
+  <!-- Account Card (own only) -->
+  <div class="accounts-grid" id="accountCards"></div>
+
+  <!-- Follower Names List (master only) -->
+  <div id="followerNamesSection" style="display:none"></div>
+
+  <!-- Orders + Positions -->
+  <div class="grid-2">
+    <div class="panel" id="ordersPanel">
+      <div class="panel-header">
+        <span class="panel-title" id="ordersPanelTitle">My FNO Orders</span>
+        <input class="filter-input" id="orderFilter" placeholder="Filter symbol..." oninput="filterOrders()" />
+        <span class="panel-count" id="orderCount">0</span>
+      </div>
+      <div class="panel-body">
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Type</th>
+              <th>Side</th>
+              <th>Qty</th>
+              <th>Price</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="ordersBody"></tbody>
+        </table>
+        <div class="empty-state" id="ordersEmpty">No orders yet</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">My Positions</span>
+        <span class="panel-count" id="posCount">0</span>
+      </div>
+      <div class="panel-body">
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Qty</th>
+              <th>Avg Price</th>
+              <th>LTP</th>
+              <th>P&amp;L</th>
+            </tr>
+          </thead>
+          <tbody id="posBody"></tbody>
+        </table>
+        <div class="empty-state" id="posEmpty">No positions</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trade History -->
+  <div class="panel" style="margin-bottom:20px">
+    <div class="panel-header">
+      <span class="panel-title">My Trades (Today)</span>
+      <button class="btn-export" onclick="exportTradesCSV()">Export CSV</button>
+      <span class="panel-count" id="tradeCount">0</span>
+    </div>
+    <div class="panel-body" style="max-height:300px">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th>Qty</th>
+            <th>Price</th>
+            <th>Type</th>
+            <th>Status</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody id="tradeBody"></tbody>
+      </table>
+      <div class="empty-state" id="tradeEmpty">No trades today</div>
+    </div>
+  </div>
+
+  <!-- Copy Log -->
+  <div class="panel log-panel">
+    <div class="panel-header">
+      <span class="panel-title">Copy Log</span>
+      <span class="last-updated" id="dataUpdated"></span>
+      <span class="panel-count" id="logCount">0</span>
+    </div>
+    <div class="panel-body" id="logBody" style="max-height:300px"></div>
+  </div>
+
+</div>
+
+</div><!-- end dashboardApp -->
+
+<!-- Settings Overlay -->
+<div class="settings-overlay" id="settingsOverlay">
+  <div class="settings-panel" id="settingsPanel">
+    <div class="settings-header">
+      <h2>Settings</h2>
+      <button class="btn-icon" onclick="closeSettings()">&times;</button>
+    </div>
+    <div class="settings-body" id="settingsBody">
+      <!-- Populated by JS -->
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let ws = null;
+let pollTimer = null;
+let indicesExpanded = false;
+let allIndicesData = [];
+let currentUser = null; // {telegram_id, name, role}
+let soundEnabled = localStorage.getItem('soundEnabled') === 'true';
+let cachedOrders = [];
+let cachedTrades = [];
+
+// Default pinned indices (shown when collapsed)
+const DEFAULT_PINNED = ['NIFTY', 'BANKNIFTY', 'SENSEX', 'FINNIFTY', 'INDIAVIX', 'NIFTYMIDCAP150'];
+function getPinnedIndices() {
+  try { return JSON.parse(localStorage.getItem('pinnedIndices')) || DEFAULT_PINNED; }
+  catch { return DEFAULT_PINNED; }
+}
+function savePinnedIndices(arr) { localStorage.setItem('pinnedIndices', JSON.stringify(arr)); }
+
+// ── Helpers ──
+function $(sel) { return document.querySelector(sel); }
+function $$(sel) { return document.querySelectorAll(sel); }
+function fmt(n, d=2) { return n != null ? Number(n).toFixed(d) : '-'; }
+function fmtInt(n) { return n != null ? Number(n).toLocaleString('en-IN') : '-'; }
+function pnlClass(v) { return v >= 0 ? 'pnl-pos' : 'pnl-neg'; }
+function sideClass(s) { return (s||'').toUpperCase() === 'BUY' ? 'buy' : 'sell'; }
+function isMaster() { return currentUser && currentUser.role === 'master'; }
+
+// ── Toast ──
+function showToast(msg, type='success') {
+  const c = $('#toastContainer');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+// ── Sound Alerts ──
+function playBeep(freq=800, dur=150) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = freq;
+    gain.gain.value = 0.15;
+    osc.start();
+    osc.stop(ctx.currentTime + dur / 1000);
+  } catch {}
+}
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  localStorage.setItem('soundEnabled', soundEnabled);
+  updateSoundBtn();
+  showToast(soundEnabled ? 'Sound alerts ON' : 'Sound alerts OFF', 'info');
+}
+function updateSoundBtn() {
+  const btn = $('#soundToggle');
+  if (!btn) return;
+  btn.innerHTML = soundEnabled ? '&#x1f50a;' : '&#x1f507;';
+  btn.classList.toggle('on', soundEnabled);
+}
+
+// ── Mobile Menu ──
+function toggleMobileMenu() {
+  $('#mobileMenu').classList.toggle('open');
+}
+
+// ── Last Updated ──
+function stampUpdated() {
+  const now = new Date().toLocaleTimeString();
+  const el = $('#dataUpdated');
+  if (el) el.textContent = 'Updated ' + now;
+}
+
+// ── Order Filter ──
+function filterOrders() {
+  const q = ($('#orderFilter').value || '').toUpperCase();
+  const rows = $$('#ordersBody tr');
+  rows.forEach(r => {
+    const sym = r.cells[0]?.textContent?.toUpperCase() || '';
+    r.style.display = sym.includes(q) ? '' : 'none';
+  });
+}
+
+// ── Export Trades CSV ──
+function exportTradesCSV() {
+  if (!cachedTrades || cachedTrades.length === 0) { showToast('No trades to export', 'error'); return; }
+  const headers = ['Symbol','Side','Qty','Price','Type','Status','Time'];
+  const rows = cachedTrades.map(o => [
+    o.trading_symbol || '',
+    (o.transaction_type || '').toUpperCase(),
+    o.quantity || '',
+    o.average_fill_price > 0 ? o.average_fill_price : (o.price > 0 ? o.price : 'MKT'),
+    o.order_type || '',
+    o.order_status || '',
+    o.created_at ? new Date(o.created_at).toLocaleString() : ''
+  ]);
+  const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `trades-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  showToast('Trades exported');
+}
+
+function formatUptime(sec) {
+  if (!sec || sec <= 0) return '';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${h}h ${m}m ${s}s`;
+}
+
+async function api(path, opts) {
+  try {
+    const r = await fetch(API + path, opts);
+    if (r.status === 401) {
+      showLogin();
+      return null;
+    }
+    if (r.status === 403) return null;
+    return await r.json();
+  } catch (e) {
+    console.error(`API ${path}:`, e);
+    return null;
+  }
+}
+
+// ── Auth ──
+async function checkAuth() {
+  try {
+    const r = await fetch('/api/me');
+    if (r.status === 401) {
+      showLogin();
+      return;
+    }
+    currentUser = await r.json();
+    showDashboard();
+  } catch {
+    showLogin();
+  }
+}
+
+function showLogin() {
+  currentUser = null;
+  $('#loginPage').style.display = '';
+  $('#dashboardApp').style.display = 'none';
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+function showDashboard() {
+  $('#loginPage').style.display = 'none';
+  $('#dashboardApp').style.display = '';
+
+  // Set user info in header
+  $('#userName').textContent = currentUser.name;
+  const roleEl = $('#userRole');
+  roleEl.textContent = currentUser.role;
+  roleEl.className = 'user-role ' + currentUser.role;
+
+  // Show/hide master-only elements
+  if (isMaster()) {
+    $('#masterControls').style.display = '';
+    $('#masterControlsMobile').style.display = '';
+    $('#statsBar').style.display = '';
+    $('#followerNamesSection').style.display = '';
+    $('#oiLink').style.display = '';
+    $('#ordersPanelTitle').textContent = 'Master FNO Orders';
+  } else {
+    $('#masterControls').style.display = 'none';
+    $('#statsBar').style.display = 'none';
+    $('#followerNamesSection').style.display = 'none';
+    $('#oiLink').style.display = 'none';
+    $('#ordersPanelTitle').textContent = 'My FNO Orders';
+  }
+
+  refreshAll();
+  connectWS();
+  updateSoundBtn();
+  pollTimer = setInterval(refreshAll, 10000);
+}
+
+function logout() {
+  window.location.href = '/api/logout';
+}
+
+// ── Status ──
+async function refreshStatus() {
+  const d = await api('/api/status');
+  if (!d) return;
+  const badge = $('#statusBadge');
+  const text = $('#statusText');
+  if (d.running) {
+    badge.className = 'status-badge running';
+    text.textContent = d.feed_mode ? 'Live Feed' : 'Polling';
+    if (isMaster()) {
+      $('#startBtn').style.display = 'none';
+      $('#stopBtn').style.display = '';
+    }
+  } else {
+    badge.className = 'status-badge stopped';
+    text.textContent = 'Stopped';
+    if (isMaster()) {
+      $('#startBtn').style.display = '';
+      $('#stopBtn').style.display = 'none';
+    }
+  }
+  $('#uptime').textContent = d.running ? formatUptime(d.uptime_seconds) : (d.feed_mode ? 'Feed connected' : '');
+
+  if (isMaster()) {
+    const dryBtn = $('#dryRunBtn');
+    if (d.dry_run) {
+      dryBtn.textContent = 'Dry Run: ON';
+      dryBtn.style.borderColor = 'var(--yellow)';
+      dryBtn.style.color = 'var(--yellow)';
+    } else {
+      dryBtn.textContent = 'LIVE';
+      dryBtn.style.borderColor = 'var(--red)';
+      dryBtn.style.color = 'var(--red)';
+    }
+    $('#statCopied').textContent = d.total_copied;
+    $('#statFailed').textContent = d.total_failed;
+    $('#statFollowers').textContent = d.active_followers;
+    const total = d.total_copied + d.total_failed;
+    $('#statRate').textContent = total > 0 ? ((d.total_copied / total) * 100).toFixed(1) + '%' : '-';
+  }
+}
+
+// ── Accounts ──
+async function refreshAccounts() {
+  const name = currentUser.name;
+  const margin = await api(`/api/account/${encodeURIComponent(name)}/margin`) || {};
+  const positions = await api(`/api/account/${encodeURIComponent(name)}/positions`) || [];
+
+  let realPnl = 0;
+  if (Array.isArray(positions)) {
+    positions.forEach(p => { realPnl += parseFloat(p.realised_pnl || 0); });
+  }
+
+  const cash = margin.clear_cash || margin.available_cash || 0;
+  const marginUsed = margin.net_margin_used || margin.margin_used || 0;
+  const roleBadge = isMaster()
+    ? `<span class="account-badge badge-master">Master</span>`
+    : `<span class="account-badge badge-follower">Follower</span>`;
+
+  $('#accountCards').innerHTML = `
+    <div class="account-card">
+      <div class="account-card-header">
+        <span class="account-name">${name}</span>
+        ${roleBadge}
+      </div>
+      <div class="account-row">
+        <span class="account-row-label">Available Cash</span>
+        <span class="account-row-value">${fmtInt(cash)}</span>
+      </div>
+      <div class="account-row">
+        <span class="account-row-label">Margin Used</span>
+        <span class="account-row-value">${fmtInt(marginUsed)}</span>
+      </div>
+      <div class="account-row">
+        <span class="account-row-label">Realized P&L</span>
+        <span class="account-row-value ${pnlClass(realPnl)}">${fmt(realPnl)}</span>
+      </div>
+    </div>
+  `;
+
+  // Master: show follower names list
+  if (isMaster()) {
+    const followers = await api('/api/followers') || [];
+    if (followers.length > 0) {
+      const rows = followers.map(f => `
+        <div class="follower-name-row">
+          <span class="fn-name">${f.name}</span>
+          <span class="fn-mult">${f.lot_mode === 'fixed' ? f.lot_fixed + ' lot' : f.lot_mode === 'multiplier' ? f.lot_multiplier + 'x' : 'Same'}</span>
+          <span class="fn-status ${f.authenticated ? 'online' : 'offline'}">${f.authenticated ? 'Online' : 'Offline'}</span>
+        </div>
+      `).join('');
+      $('#followerNamesSection').innerHTML = `
+        <div class="follower-names-panel">
+          <div class="follower-names-title">Followers</div>
+          ${rows}
+        </div>
+      `;
+    } else {
+      $('#followerNamesSection').innerHTML = '';
+    }
+  }
+}
+
+// ── Orders ──
+async function refreshOrders() {
+  // Each user sees their own orders
+  const name = currentUser.name;
+  const allOrders = await api(`/api/account/${encodeURIComponent(name)}/orders`) || [];
+  const orders = allOrders.filter(o => (o.segment || '').toUpperCase() === 'FNO' || (o.segment || '').toUpperCase() === 'COMMODITY');
+  cachedOrders = orders;
+  const body = $('#ordersBody');
+  const empty = $('#ordersEmpty');
+  $('#orderCount').textContent = orders.length;
+  if (orders.length === 0) {
+    body.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  body.innerHTML = orders.map(o => `
+    <tr>
+      <td>${o.trading_symbol || '-'}</td>
+      <td>${o.order_type || '-'}</td>
+      <td class="${sideClass(o.transaction_type)}">${(o.transaction_type || '').toUpperCase()}</td>
+      <td>${o.quantity || '-'}</td>
+      <td>${o.price || 'MKT'}</td>
+      <td>${o.order_status || '-'}</td>
+    </tr>
+  `).join('');
+}
+
+// ── Positions ──
+async function refreshPositions() {
+  const name = currentUser.name;
+  const positions = await api(`/api/account/${encodeURIComponent(name)}/positions`) || [];
+
+  const body = $('#posBody');
+  const empty = $('#posEmpty');
+  const open = Array.isArray(positions) ? positions.filter(p => parseInt(p.quantity || 0) !== 0) : [];
+  $('#posCount').textContent = open.length;
+  if (open.length === 0) {
+    body.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  let totalPnl = 0;
+  body.innerHTML = open.map(p => {
+    const pnl = parseFloat(p.realised_pnl || 0);
+    totalPnl += pnl;
+    return `
+    <tr>
+      <td>${p.trading_symbol || '-'}</td>
+      <td>${p.quantity || '-'}</td>
+      <td>${fmt(p.net_price || p.average_price)}</td>
+      <td>${fmt(p.credit_price || p.ltp)}</td>
+      <td class="${pnlClass(pnl)}">${fmt(pnl)}</td>
+    </tr>`;
+  }).join('');
+  // Update P&L stat card
+  const pnlEl = $('#statPnl');
+  if (pnlEl) {
+    pnlEl.textContent = fmt(totalPnl);
+    pnlEl.className = 'stat-value ' + (totalPnl >= 0 ? 'green' : 'red');
+    const ts = $('#pnlUpdated');
+    if (ts) ts.textContent = new Date().toLocaleTimeString();
+  }
+}
+
+// ── Trade History ──
+async function refreshTrades() {
+  const name = currentUser.name;
+  const orders = await api(`/api/account/${encodeURIComponent(name)}/orders`) || [];
+  cachedTrades = orders;
+
+  const body = $('#tradeBody');
+  const empty = $('#tradeEmpty');
+  $('#tradeCount').textContent = orders.length;
+  if (orders.length === 0) {
+    body.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  body.innerHTML = orders.map(o => `
+    <tr>
+      <td>${o.trading_symbol || '-'}</td>
+      <td class="${sideClass(o.transaction_type)}">${(o.transaction_type || '').toUpperCase()}</td>
+      <td>${o.quantity || '-'}</td>
+      <td>${o.average_fill_price > 0 ? fmt(o.average_fill_price) : (o.price > 0 ? fmt(o.price) : 'MKT')}</td>
+      <td>${o.order_type || '-'}</td>
+      <td>${o.order_status || '-'}</td>
+      <td>${o.created_at ? new Date(o.created_at).toLocaleTimeString() : '-'}</td>
+    </tr>
+  `).join('');
+}
+
+// ── Copy Log ──
+async function refreshLog() {
+  const logs = await api('/api/copy-log') || [];
+  renderLogs(logs);
+}
+
+function renderLogs(logs) {
+  const body = $('#logBody');
+  $('#logCount').textContent = logs.length;
+  body.innerHTML = logs.slice().reverse().map(l => `
+    <div class="log-entry">
+      <span class="log-time">${l.time ? new Date(l.time).toLocaleTimeString() : ''}</span>
+      <span class="log-status ${l.status}"></span>
+      <span class="log-event">${l.event}</span>
+      ${l.details ? `<span class="log-detail">${l.details}</span>` : ''}
+    </div>
+  `).join('');
+}
+
+function appendLogEntry(entry) {
+  const body = $('#logBody');
+  if (!body) return;
+  const count = parseInt($('#logCount').textContent || '0');
+  $('#logCount').textContent = count + 1;
+  const html = `
+    <div class="log-entry">
+      <span class="log-time">${entry.time ? new Date(entry.time).toLocaleTimeString() : ''}</span>
+      <span class="log-status ${entry.status}"></span>
+      <span class="log-event">${entry.event}</span>
+      ${entry.details ? `<span class="log-detail">${entry.details}</span>` : ''}
+    </div>`;
+  body.insertAdjacentHTML('afterbegin', html);
+  while (body.children.length > 100) body.removeChild(body.lastChild);
+}
+
+// ── Controls ──
+async function startCopier() {
+  await api('/api/copier/start', { method: 'POST' });
+  showToast('Copier started', 'success');
+  refreshStatus();
+}
+
+async function stopCopier() {
+  await api('/api/copier/stop', { method: 'POST' });
+  showToast('Copier stopped', 'info');
+  refreshStatus();
+}
+
+async function toggleDryRun() {
+  await api('/api/copier/dry-run', { method: 'POST' });
+  refreshStatus();
+}
+
+// ── Market Indices ──
+function renderIndexCard(idx, showPin) {
+  const ltp = parseFloat(idx.ltp || idx.lastTradedPrice || idx.value || 0);
+  const change = parseFloat(idx.change || idx.netChange || 0);
+  const changePct = parseFloat(idx.changePercent || idx.percentChange || 0);
+  const dir = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
+  const arrow = change > 0 ? '\u25B2' : change < 0 ? '\u25BC' : '';
+  const sign = change > 0 ? '+' : '';
+  const pinned = getPinnedIndices();
+  const isPinned = pinned.includes(idx.token);
+  const pinBtn = showPin
+    ? `<span style="position:absolute;top:8px;right:10px;cursor:pointer;font-size:14px;opacity:.4;line-height:1;z-index:1" title="${isPinned ? 'Unpin' : 'Pin'}" onclick="event.stopPropagation();togglePin('${idx.token}')">${isPinned ? '\u00d7' : '+'}</span>`
+    : '';
+  const fmt = v => v ? parseFloat(v).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '--';
+  const high = idx.high || idx.dayHigh;
+  const low = idx.low || idx.dayLow;
+  const open = idx.open;
+  const prevClose = idx.close || idx.previousClose;
+  return `<div class="index-card ${dir}">
+    ${pinBtn}
+    <div class="index-top">
+      <div class="index-name">${idx.name || idx.token}</div>
+    </div>
+    <div class="index-value">${ltp ? ltp.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '--'}</div>
+    <div class="index-change ${dir}">${arrow} ${sign}${change.toFixed(2)} (${sign}${changePct.toFixed(2)}%)</div>
+    <div class="index-ohlc">
+      <div class="index-ohlc-col">
+        <div class="index-ohlc-row"><span class="index-ohlc-label">Open</span><span class="index-ohlc-val">${fmt(open)}</span></div>
+        <div class="index-ohlc-row"><span class="index-ohlc-label">High</span><span class="index-ohlc-val" style="color:var(--green)">${fmt(high)}</span></div>
+      </div>
+      <div class="index-ohlc-col">
+        <div class="index-ohlc-row"><span class="index-ohlc-label">Prev Cl</span><span class="index-ohlc-val">${fmt(prevClose)}</span></div>
+        <div class="index-ohlc-row"><span class="index-ohlc-label">Low</span><span class="index-ohlc-val" style="color:var(--red)">${fmt(low)}</span></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function togglePin(token) {
+  const pinned = getPinnedIndices();
+  const idx = pinned.indexOf(token);
+  if (idx !== -1) pinned.splice(idx, 1);
+  else pinned.push(token);
+  savePinnedIndices(pinned);
+  renderIndices();
+}
+
+function toggleIndicesExpand() {
+  indicesExpanded = !indicesExpanded;
+  $('#indicesToggle').textContent = indicesExpanded ? 'Show Less' : 'Show All';
+  renderIndices();
+}
+
+function renderIndices() {
+  const grid = $('#indicesGrid');
+  if (!allIndicesData || allIndicesData.length === 0) {
+    grid.innerHTML = '<div class="indices-empty">Waiting for market data...</div>';
+    return;
+  }
+  const pinned = getPinnedIndices();
+  let toShow;
+  if (indicesExpanded) {
+    const pinnedItems = allIndicesData.filter(d => pinned.includes(d.token));
+    const rest = allIndicesData.filter(d => !pinned.includes(d.token));
+    pinnedItems.sort((a, b) => pinned.indexOf(a.token) - pinned.indexOf(b.token));
+    rest.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    toShow = [...pinnedItems, ...rest];
+  } else {
+    toShow = allIndicesData.filter(d => pinned.includes(d.token));
+    toShow.sort((a, b) => pinned.indexOf(a.token) - pinned.indexOf(b.token));
+  }
+  grid.innerHTML = toShow.map(idx => renderIndexCard(idx, indicesExpanded)).join('');
+  const total = allIndicesData.length;
+  $('#indicesToggle').textContent = indicesExpanded ? 'Show Less' : `Show All (${total})`;
+}
+
+async function refreshIndices() {
+  try {
+    const pinned = getPinnedIndices();
+    const query = pinned.length ? `?pinned=${pinned.join(',')}` : '';
+    const data = await api('/api/indices' + query);
+    if (!data || data.length === 0) return;
+    allIndicesData = data;
+    renderIndices();
+    $('#indicesTime').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    console.error('Indices error:', e);
+  }
+}
+
+// ── WebSocket ──
+function connectWS() {
+  if (ws) return;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => { $('#wsBanner').style.display = 'none'; };
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      // OI updates are handled on /oi page
+      if (data.type === 'oi_update') return;
+      appendLogEntry(data);
+      if (data.event && (data.event.includes('started') || data.event.includes('stopped'))) {
+        refreshStatus();
+      }
+      // Sound alerts
+      if (soundEnabled && data.status) {
+        if (data.status === 'success') playBeep(900, 120);
+        else if (data.status === 'error') playBeep(400, 250);
+      }
+    } catch {}
+  };
+  ws.onclose = () => { ws = null; $('#wsBanner').style.display = ''; setTimeout(connectWS, 3000); };
+  ws.onerror = () => ws.close();
+}
+
+// ── Settings ──
+function openSettings() {
+  $('#settingsOverlay').classList.add('open');
+  loadSettings();
+}
+
+function closeSettings() {
+  $('#settingsOverlay').classList.remove('open');
+}
+
+$('#settingsOverlay').addEventListener('click', (e) => {
+  if (e.target === $('#settingsOverlay')) closeSettings();
+});
+
+async function loadSettings() {
+  const s = await api('/api/settings');
+  if (!s) return;
+  const body = $('#settingsBody');
+
+  if (isMaster()) {
+    // Master sees full settings
+    const mTotp = s.master.use_totp;
+    body.innerHTML = `
+      <div class="settings-accordion" onclick="toggleAccordion(this, event)">
+        <div class="accordion-header">
+          <span class="accordion-title">Master Account</span>
+          <span class="accordion-chevron">&#x25B8;</span>
+        </div>
+        <div class="accordion-body">
+          <div class="accordion-body-inner">
+            <div class="form-group">
+              <label class="form-label">Name</label>
+              <input class="form-input" id="sMasterName" value="${s.master.name}" />
+            </div>
+            <div class="toggle-row" style="margin-bottom:12px">
+              <span class="toggle-label">Auth via TOTP</span>
+              <div class="toggle ${mTotp ? 'on' : ''}" id="sMasterTotp" onclick="event.stopPropagation();this.classList.toggle('on');toggleMasterAuth()"></div>
+            </div>
+            <div id="masterTotpFields" style="display:${mTotp ? 'block' : 'none'}">
+              <div class="form-group">
+                <label class="form-label">TOTP Token</label>
+                <div class="password-wrap">
+                  <input class="form-input" id="sMasterKey" type="password" value="" placeholder="${s.master.api_key}" />
+                  <button class="reveal-btn" onclick="toggleReveal(this)">&#x1f441;</button>
+                </div>
+                <div class="stat-sub" style="margin-top:4px">The JWT token from Groww TOTP setup (eyJra...)</div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">TOTP Secret</label>
+                <div class="password-wrap">
+                  <input class="form-input" id="sMasterTotpSecret" type="password" value="" placeholder="${s.master.totp_secret}" />
+                  <button class="reveal-btn" onclick="toggleReveal(this)">&#x1f441;</button>
+                </div>
+                <div class="stat-sub" style="margin-top:4px">The secret below the QR code (base32 string)</div>
+              </div>
+            </div>
+            <div id="masterKeyFields" style="display:${mTotp ? 'none' : 'block'}">
+              <div class="form-group">
+                <label class="form-label">API Key</label>
+                <div class="password-wrap">
+                  <input class="form-input" id="sMasterKeyAlt" type="password" value="" placeholder="${s.master.api_key}" />
+                  <button class="reveal-btn" onclick="toggleReveal(this)">&#x1f441;</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">API Secret</label>
+                <div class="password-wrap">
+                  <input class="form-input" id="sMasterSecret" type="password" value="" placeholder="${s.master.secret}" />
+                  <button class="reveal-btn" onclick="toggleReveal(this)">&#x1f441;</button>
+                </div>
+              </div>
+            </div>
+            <button class="btn btn-green" style="width:100%;margin-top:8px" onclick="event.stopPropagation();saveMaster()">Save Master</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-accordion" onclick="toggleAccordion(this, event)">
+        <div class="accordion-header">
+          <span class="accordion-title">Followers</span>
+          <span class="accordion-chevron">&#x25B8;</span>
+        </div>
+        <div class="accordion-body">
+          <div class="accordion-body-inner">
+            <div id="followersSettings">
+              ${s.followers.map((f, i) => followerCardHtml(f, i)).join('')}
+            </div>
+            <button class="btn btn-ghost" style="width:100%;margin-top:8px" onclick="event.stopPropagation();addFollowerForm()">+ Add Follower</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-accordion" onclick="toggleAccordion(this, event)">
+        <div class="accordion-header">
+          <span class="accordion-title">Dashboard Indices</span>
+          <span class="accordion-chevron">&#x25B8;</span>
+        </div>
+        <div class="accordion-body">
+          <div class="accordion-body-inner">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Select which indices to show on the dashboard when collapsed.</div>
+            <div id="indicesSettings">${renderIndicesSettings()}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    // Follower sees only their own credentials
+    const own = s.own || {};
+    const fTotp = own.use_totp;
+    body.innerHTML = `
+      <div class="settings-accordion" onclick="toggleAccordion(this, event)">
+        <div class="accordion-header">
+          <span class="accordion-title">My Credentials</span>
+          <span class="accordion-chevron">&#x25B8;</span>
+        </div>
+        <div class="accordion-body">
+          <div class="accordion-body-inner">
+            <div class="toggle-row" style="margin-bottom:12px">
+              <span class="toggle-label">Auth via TOTP</span>
+              <div class="toggle ${fTotp ? 'on' : ''}" id="sOwnTotp" onclick="event.stopPropagation();this.classList.toggle('on');toggleOwnAuth()"></div>
+            </div>
+            <div id="ownTotpFields" style="display:${fTotp ? 'block' : 'none'}">
+              <div class="form-group">
+                <label class="form-label">TOTP Token</label>
+                <div class="password-wrap">
+                  <input class="form-input" id="sOwnKey" type="password" value="" placeholder="${own.api_key || ''}" />
+                  <button class="reveal-btn" onclick="toggleReveal(this)">&#x1f441;</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">TOTP Secret</label>
+                <div class="password-wrap">
+                  <input class="form-input" id="sOwnTotpSecret" type="password" value="" placeholder="${own.totp_secret || ''}" />
+                  <button class="reveal-btn" onclick="toggleReveal(this)">&#x1f441;</button>
+                </div>
+              </div>
+            </div>
+            <div id="ownKeyFields" style="display:${fTotp ? 'none' : 'block'}">
+              <div class="form-group">
+                <label class="form-label">API Key</label>
+                <div class="password-wrap">
+                  <input class="form-input" id="sOwnKeyAlt" type="password" value="" placeholder="${own.api_key || ''}" />
+                  <button class="reveal-btn" onclick="toggleReveal(this)">&#x1f441;</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">API Secret</label>
+                <div class="password-wrap">
+                  <input class="form-input" id="sOwnSecret" type="password" value="" placeholder="${own.secret || ''}" />
+                  <button class="reveal-btn" onclick="toggleReveal(this)">&#x1f441;</button>
+                </div>
+              </div>
+            </div>
+            <button class="btn btn-green" style="width:100%;margin-top:8px" onclick="event.stopPropagation();saveOwn()">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-accordion" onclick="toggleAccordion(this, event)">
+        <div class="accordion-header">
+          <span class="accordion-title">Trade Settings</span>
+          <span class="accordion-chevron">&#x25B8;</span>
+        </div>
+        <div class="accordion-body">
+          <div class="accordion-body-inner">
+            <div class="form-group">
+              <label class="form-label">Lot Mode</label>
+              <div style="font-size:13px;color:var(--text-secondary);padding:8px 12px;background:var(--bg-secondary);border-radius:6px;border:1px solid var(--border)">
+                ${(own.lot_mode||'same')==='fixed' ? 'Fixed: ' + (own.lot_fixed||1) + ' lot' : (own.lot_mode||'same')==='multiplier' ? 'Multiplier: ' + (own.lot_multiplier||1) + 'x' : 'Same as Master'}
+                <span style="color:var(--text-muted);font-size:11px;margin-left:8px">(set by admin)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-accordion" onclick="toggleAccordion(this, event)">
+        <div class="accordion-header">
+          <span class="accordion-title">Dashboard Indices</span>
+          <span class="accordion-chevron">&#x25B8;</span>
+        </div>
+        <div class="accordion-body">
+          <div class="accordion-body-inner">
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Select which indices to show on the dashboard when collapsed.</div>
+            <div id="indicesSettings">${renderIndicesSettings()}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+}
+
+function selectOwnLotMode(btn) {
+  document.querySelectorAll('.own-lotmode').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const mode = btn.dataset.mode;
+  document.querySelector('.own-lot-fixed-wrap').style.display = mode === 'fixed' ? 'block' : 'none';
+  document.querySelector('.own-lot-mult-wrap').style.display = mode === 'multiplier' ? 'block' : 'none';
+}
+
+function toggleOwnAuth() {
+  const on = $('#sOwnTotp').classList.contains('on');
+  $('#ownTotpFields').style.display = on ? 'block' : 'none';
+  $('#ownKeyFields').style.display = on ? 'none' : 'block';
+}
+
+async function saveOwn() {
+  const body = {};
+  const useTotp = $('#sOwnTotp').classList.contains('on');
+  body.use_totp = useTotp;
+
+  if (useTotp) {
+    const token = $('#sOwnKey').value;
+    const totpSecret = $('#sOwnTotpSecret').value;
+    if (token) body.api_key = token;
+    if (totpSecret) body.totp_secret = totpSecret;
+  } else {
+    const key = $('#sOwnKeyAlt').value;
+    const secret = $('#sOwnSecret').value;
+    if (key) body.api_key = key;
+    if (secret) body.secret = secret;
+  }
+
+  const r = await api(`/api/settings/followers/${encodeURIComponent(currentUser.name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  showToast(r ? 'Credentials saved' : 'Failed to save', r ? 'success' : 'error');
+  loadSettings();
+  refreshAll();
+}
+
+function renderIndicesSettings() {
+  const ALL_INDICES = [
+    {token:'NIFTY', name:'NIFTY 50'}, {token:'BANKNIFTY', name:'NIFTY Bank'},
+    {token:'SENSEX', name:'SENSEX'}, {token:'FINNIFTY', name:'Fin Nifty'},
+    {token:'INDIAVIX', name:'India VIX'}, {token:'NIFTYJR', name:'Nifty Next 50'},
+    {token:'NIFTY100', name:'NIFTY 100'}, {token:'NIFTY500', name:'NIFTY 500'},
+    {token:'NIFTYMIDCAP150', name:'Nifty Midcap 150'}, {token:'NIFTYMIDSELECT', name:'Nifty Midcap Select'},
+    {token:'NIFTYMIDCAP', name:'Nifty Midcap 100'}, {token:'NIFTYSMALL', name:'Nifty Smallcap 100'},
+    {token:'NIFTYSMALLCAP250', name:'Nifty Smallcap 250'}, {token:'NIFTYIT', name:'NIFTY IT'},
+    {token:'NIFTYPHARMA', name:'NIFTY Pharma'}, {token:'NIFTYFMCG', name:'NIFTY FMCG'},
+    {token:'NIFTYMETAL', name:'NIFTY Metal'}, {token:'NIFTYAUTO', name:'NIFTY Auto'},
+    {token:'NIFTYREALTY', name:'NIFTY Realty'}, {token:'NIFTYPVTBANK', name:'NIFTY Pvt Bank'},
+    {token:'NIFTYPSUBANK', name:'NIFTY PSU Bank'}, {token:'NIFTYMEDIA', name:'NIFTY Media'},
+    {token:'NIFTYCDTY', name:'NIFTY Commodities'}, {token:'NIFTYTOTALMCAP', name:'Nifty Total Market'},
+    {token:'BANKEX', name:'BSE Bankex'}, {token:'BSE100', name:'BSE 100'},
+    {token:'BSEMIDCAP', name:'BSE Midcap'}, {token:'BSESMLCAP', name:'BSE Smallcap'},
+  ];
+  const pinned = getPinnedIndices();
+  return ALL_INDICES.map(idx => {
+    const checked = pinned.includes(idx.token) ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer;font-size:13px;color:var(--text-primary)">
+      <input type="checkbox" ${checked} onchange="togglePinFromSettings('${idx.token}', this.checked)" style="accent-color:var(--cyan)" />
+      ${idx.name}
+    </label>`;
+  }).join('');
+}
+
+function togglePinFromSettings(token, add) {
+  const pinned = getPinnedIndices();
+  const idx = pinned.indexOf(token);
+  if (add && idx === -1) pinned.push(token);
+  if (!add && idx !== -1) pinned.splice(idx, 1);
+  savePinnedIndices(pinned);
+  renderIndices();
+}
+
+function toggleAccordion(el, event) {
+  // Don't toggle when clicking inputs, buttons, toggles, or labels inside the body
+  const target = event.target;
+  if (target.closest('.accordion-body')) return;
+  el.classList.toggle('open');
+}
+
+function toggleMasterAuth() {
+  const on = $('#sMasterTotp').classList.contains('on');
+  $('#masterTotpFields').style.display = on ? 'block' : 'none';
+  $('#masterKeyFields').style.display = on ? 'none' : 'block';
+}
+
+function followerCardHtml(f, idx) {
+  const fTotp = f.use_totp;
+  return `
+  <div class="follower-card-settings" data-name="${f.name}" data-idx="${idx}">
+    <div class="follower-card-header">
+      <span>${f.name}</span>
+      <button class="btn-delete" onclick="deleteFollower('${f.name}')">Delete</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input class="form-input f-name" value="${f.name}" />
+    </div>
+    <div class="toggle-row" style="margin-bottom:10px">
+      <span class="toggle-label">Auth via TOTP</span>
+      <div class="toggle f-totp ${fTotp ? 'on' : ''}" onclick="this.classList.toggle('on');toggleFollowerAuth(this)"></div>
+    </div>
+    <div class="f-totp-fields" style="display:${fTotp ? 'block' : 'none'}">
+      <div class="form-group">
+        <label class="form-label">TOTP Token</label>
+        <div class="password-wrap">
+          <input class="form-input f-key" type="password" value="" placeholder="${f.api_key}" />
+          <button class="reveal-btn" onclick="toggleReveal(this)">&#x1f441;</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">TOTP Secret</label>
+        <div class="password-wrap">
+          <input class="form-input f-totp-secret" type="password" value="" placeholder="${f.totp_secret}" />
+          <button class="reveal-btn" onclick="toggleReveal(this)">&#x1f441;</button>
+        </div>
+      </div>
+    </div>
+    <div class="f-key-fields" style="display:${fTotp ? 'none' : 'block'}">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">API Key</label>
+          <div class="password-wrap">
+            <input class="form-input f-key-alt" type="password" value="" placeholder="${f.api_key}" />
+            <button class="reveal-btn" onclick="toggleReveal(this)">&#x1f441;</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">API Secret</label>
+          <div class="password-wrap">
+            <input class="form-input f-secret" type="password" value="" placeholder="${f.secret}" />
+            <button class="reveal-btn" onclick="toggleReveal(this)">&#x1f441;</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Lot Mode</label>
+        <div class="lot-mode-group">
+          <button class="lot-mode-btn f-lotmode ${(f.lot_mode||'same')==='same'?'active':''}" data-mode="same" onclick="selectLotMode(this)">Same Lot</button>
+          <button class="lot-mode-btn f-lotmode ${(f.lot_mode||'same')==='fixed'?'active':''}" data-mode="fixed" onclick="selectLotMode(this)">Fixed Lot</button>
+          <button class="lot-mode-btn f-lotmode ${(f.lot_mode||'same')==='multiplier'?'active':''}" data-mode="multiplier" onclick="selectLotMode(this)">Multiplier</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group f-lot-fixed-wrap" style="display:${(f.lot_mode||'same')==='fixed'?'block':'none'}">
+        <label class="form-label">Fixed Quantity</label>
+        <input class="form-input f-lot-fixed" type="number" step="1" min="1" value="${f.lot_fixed || 1}" />
+      </div>
+      <div class="form-group f-lot-mult-wrap" style="display:${(f.lot_mode||'same')==='multiplier'?'block':'none'}">
+        <label class="form-label">Multiplier</label>
+        <input class="form-input f-lot" type="number" step="0.1" min="0.1" value="${f.lot_multiplier}" />
+      </div>
+      <div class="form-group" style="display:flex;align-items:flex-end;padding-bottom:1px">
+        <div class="toggle-row" style="width:100%">
+          <span class="toggle-label">Enabled</span>
+          <div class="toggle f-enabled ${f.enabled ? 'on' : ''}" onclick="this.classList.toggle('on')"></div>
+        </div>
+      </div>
+    </div>
+    <button class="btn btn-ghost" style="width:100%;margin-top:6px" onclick="saveFollower('${f.name}', this)">Save</button>
+  </div>`;
+}
+
+function selectLotMode(btn) {
+  const card = btn.closest('.follower-card-settings');
+  card.querySelectorAll('.f-lotmode').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const mode = btn.dataset.mode;
+  card.querySelector('.f-lot-fixed-wrap').style.display = mode === 'fixed' ? 'block' : 'none';
+  card.querySelector('.f-lot-mult-wrap').style.display = mode === 'multiplier' ? 'block' : 'none';
+}
+
+function toggleFollowerAuth(el) {
+  const card = el.closest('.follower-card-settings');
+  const on = el.classList.contains('on');
+  card.querySelector('.f-totp-fields').style.display = on ? 'block' : 'none';
+  card.querySelector('.f-key-fields').style.display = on ? 'none' : 'block';
+}
+
+function toggleReveal(btn) {
+  const input = btn.parentElement.querySelector('input');
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+async function saveMaster() {
+  const body = {};
+  const name = $('#sMasterName').value;
+  const useTotp = $('#sMasterTotp').classList.contains('on');
+
+  if (name) body.name = name;
+  body.use_totp = useTotp;
+
+  if (useTotp) {
+    const token = $('#sMasterKey').value;
+    const totpSecret = $('#sMasterTotpSecret').value;
+    if (token) body.api_key = token;
+    if (totpSecret) body.totp_secret = totpSecret;
+  } else {
+    const key = $('#sMasterKeyAlt').value;
+    const secret = $('#sMasterSecret').value;
+    if (key) body.api_key = key;
+    if (secret) body.secret = secret;
+  }
+
+  const r = await api('/api/settings/master', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  showToast(r ? 'Master settings saved' : 'Failed to save', r ? 'success' : 'error');
+  loadSettings();
+  refreshAll();
+}
+
+async function saveFollower(originalName, btn) {
+  const card = btn.closest('.follower-card-settings');
+  const body = {};
+  const name = card.querySelector('.f-name').value;
+  const useTotp = card.querySelector('.f-totp').classList.contains('on');
+  const enabled = card.querySelector('.f-enabled').classList.contains('on');
+
+  // Lot mode
+  const activeMode = card.querySelector('.f-lotmode.active');
+  const lotMode = activeMode ? activeMode.dataset.mode : 'same';
+  body.lot_mode = lotMode;
+  if (lotMode === 'multiplier') {
+    body.lot_multiplier = parseFloat(card.querySelector('.f-lot').value) || 1.0;
+  }
+  if (lotMode === 'fixed') {
+    body.lot_fixed = parseInt(card.querySelector('.f-lot-fixed').value) || 1;
+  }
+
+  if (name && name !== originalName) body.name = name;
+  body.use_totp = useTotp;
+  body.enabled = enabled;
+
+  if (useTotp) {
+    const token = card.querySelector('.f-key').value;
+    const totpSecret = card.querySelector('.f-totp-secret').value;
+    if (token) body.api_key = token;
+    if (totpSecret) body.totp_secret = totpSecret;
+  } else {
+    const key = card.querySelector('.f-key-alt').value;
+    const secret = card.querySelector('.f-secret').value;
+    if (key) body.api_key = key;
+    if (secret) body.secret = secret;
+  }
+
+  const r = await api(`/api/settings/followers/${encodeURIComponent(originalName)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  showToast(r ? `${originalName} saved` : 'Failed to save', r ? 'success' : 'error');
+  loadSettings();
+  refreshAll();
+}
+
+async function deleteFollower(name) {
+  if (!confirm(`Delete follower "${name}"? This will remove all their API keys and settings.`)) return;
+  await api(`/api/settings/followers/${encodeURIComponent(name)}`, { method: 'DELETE' });
+  showToast(`${name} deleted`);
+  loadSettings();
+  refreshAll();
+}
+
+async function addFollowerForm() {
+  const name = prompt('Follower name:');
+  if (!name) return;
+  await api('/api/settings/followers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  loadSettings();
+}
+
+// ── Refresh All ──
+async function refreshAll() {
+  if (!currentUser) return;
+  refreshStatus();
+  refreshOrders();
+  refreshLog();
+  refreshIndices();
+  refreshAccounts();
+  refreshPositions();
+  refreshTrades();
+  stampUpdated();
+}
+
+// ── Init ──
+checkAuth();
+</script>
+</body>
+</html>

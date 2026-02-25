@@ -1,0 +1,32 @@
+{
+    "telegram_bot_token": "YOUR_BOT_TOKEN",
+    "jwt_secret": "change-me-to-a-random-secret",
+    "dashboard_url": "http://localhost:8002",
+    "poll_interval_seconds": 3,
+    "master": {
+        "telegram_id": 0,
+        "name": "Master",
+        "api_key": "YOUR_GROWW_API_KEY_OR_JWT_TOKEN",
+        "secret": "YOUR_API_SECRET",
+        "use_totp": true,
+        "totp_secret": "YOUR_TOTP_SECRET_BASE32"
+    },
+    "oi_analytics": {
+        "enabled": false,
+        "instruments": ["NIFTY", "BANKNIFTY"],
+        "poll_interval_seconds": 180,
+        "unusual_oi_threshold": 2.0
+    },
+    "followers": [
+        {
+            "telegram_id": 0,
+            "name": "Follower-1",
+            "api_key": "FOLLOWER_API_KEY_OR_JWT_TOKEN",
+            "secret": "FOLLOWER_API_SECRET",
+            "use_totp": false,
+            "totp_secret": "",
+            "lot_multiplier": 1,
+            "enabled": true
+        }
+    ]
+}

@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OI Analytics — Groww Copier</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-primary: #0B0E11;
+  --bg-secondary: #1E2329;
+  --bg-card: #181C22;
+  --bg-card-hover: #1E2329;
+  --border: #2B3139;
+  --border-light: #363D47;
+  --text-primary: #EAECEF;
+  --text-secondary: #848E9C;
+  --text-muted: #5E6673;
+  --green: #00C087;
+  --green-dim: rgba(0,192,135,.12);
+  --red: #F6465D;
+  --red-dim: rgba(246,70,93,.12);
+  --blue: #2962FF;
+  --blue-dim: rgba(41,98,255,.12);
+  --cyan: #00B8D9;
+  --yellow: #FCD535;
+  --yellow-dim: rgba(252,213,53,.12);
+}
+
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+/* ── Nav Bar ── */
+.nav {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.nav-brand {
+  font-size: 18px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--cyan), var(--blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-decoration: none;
+}
+.nav-link {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  transition: all .15s;
+}
+.nav-link:hover { color: var(--text-primary); background: rgba(255,255,255,.04); }
+.nav-link.active {
+  color: var(--cyan);
+  background: var(--blue-dim);
+  font-weight: 600;
+}
+.nav-spacer { flex: 1; }
+.nav-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+.nav-user-name { font-size: 13px; font-weight: 500; }
+.btn-logout {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all .15s;
+}
+.btn-logout:hover { background: var(--red-dim); color: var(--red); border-color: var(--red); }
+
+/* ── Main Layout ── */
+.main { padding: 20px 24px; max-width: 1600px; margin: 0 auto; }
+
+/* ── Buttons ── */
+.btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn:active { transform: scale(.97); }
+.btn-green { background: var(--green); color: #000; }
+.btn-green:hover { background: #00d694; }
+.btn-red { background: var(--red); color: #fff; }
+.btn-red:hover { background: #ff5c72; }
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover { background: var(--bg-card); color: var(--text-primary); border-color: var(--border-light); }
+
+/* ── Panels / Tables ── */
+.panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.panel-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.panel-title { font-size: 14px; font-weight: 600; }
+.panel-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-primary);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.panel-body { max-height: 400px; overflow-y: auto; }
+
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+}
+tbody td {
+  padding: 10px 14px;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(43,49,57,.5);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+}
+tbody tr { transition: background .1s; }
+tbody tr:hover { background: rgba(255,255,255,.02); }
+tbody tr:last-child td { border-bottom: none; }
+
+.empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── Last Updated ── */
+.last-updated {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ── Toast ── */
+.toast-container {
+  position: fixed;
+  top: 70px;
+  right: 24px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  pointer-events: all;
+  animation: toastIn .3s ease, toastOut .3s ease 2.7s forwards;
+  box-shadow: 0 4px 16px rgba(0,0,0,.4);
+}
+.toast.success { background: var(--green); color: #000; }
+.toast.error { background: var(--red); color: #fff; }
+.toast.info { background: var(--blue); color: #fff; }
+@keyframes toastIn { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:translateX(0); } }
+@keyframes toastOut { from { opacity:1; } to { opacity:0; transform:translateY(-10px); } }
+
+/* ── WS Reconnect Banner ── */
+.ws-banner {
+  position: fixed;
+  top: 57px;
+  left: 0; right: 0;
+  z-index: 150;
+  text-align: center;
+  padding: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--yellow-dim);
+  color: var(--yellow);
+  border-bottom: 1px solid var(--yellow);
+  display: none;
+}
+
+/* ── Form elements ── */
+.form-group { margin-bottom: 12px; }
+.form-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+}
+.form-input {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+  transition: border-color .15s;
+}
+.form-input:focus { outline: none; border-color: var(--blue); }
+.form-input::placeholder { color: var(--text-muted); }
+.form-row { display: flex; gap: 12px; }
+.form-row > * { flex: 1; }
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+.toggle-label { font-size: 13px; }
+.toggle {
+  width: 40px; height: 22px;
+  background: var(--border);
+  border-radius: 11px;
+  position: relative;
+  cursor: pointer;
+  transition: background .2s;
+}
+.toggle.on { background: var(--green); }
+.toggle::after {
+  content: '';
+  width: 16px; height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  position: absolute;
+  top: 3px; left: 3px;
+  transition: transform .2s;
+}
+.toggle.on::after { transform: translateX(18px); }
+
+/* ── Settings Panel ── */
+.settings-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.settings-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+
+/* ── OI Analytics ── */
+.oi-section {
+  margin-bottom: 20px;
+}
+.oi-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.oi-title {
+  font-size: 16px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--cyan), var(--blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.oi-header .last-updated { margin-left: auto; }
+.oi-tabs {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.oi-tab {
+  padding: 8px 20px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+}
+.oi-tab:not(:last-child) { border-right: 1px solid var(--border); }
+.oi-tab.active {
+  background: var(--blue-dim);
+  color: var(--cyan);
+}
+.oi-tab:hover:not(.active) {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+.oi-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.oi-summary-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  text-align: center;
+}
+.oi-summary-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 6px;
+}
+.oi-summary-value {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+.oi-sentiment {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.oi-sentiment.bullish { background: var(--green-dim); color: var(--green); }
+.oi-sentiment.bearish { background: var(--red-dim); color: var(--red); }
+.oi-sentiment.neutral { background: rgba(132,142,156,.15); color: var(--text-secondary); }
+
+.oi-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+@media (max-width: 1100px) { .oi-grid-2 { grid-template-columns: 1fr; } }
+
+.signal-long-buildup { color: var(--green); }
+.signal-short-buildup { color: var(--red); }
+.signal-long-unwinding { color: var(--yellow); }
+.signal-short-covering { color: var(--cyan); }
+
+.oi-unusual-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--cyan);
+  border-radius: 0 8px 8px 0;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+}
+.oi-unusual-card.added { border-left-color: var(--green); }
+.oi-unusual-card.reduced { border-left-color: var(--red); }
+.oi-unusual-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.oi-unusual-strike {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  font-size: 14px;
+}
+.oi-unusual-ratio {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--blue-dim);
+  color: var(--cyan);
+  font-weight: 600;
+}
+.oi-unusual-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.oi-suggestion-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 10px;
+  position: relative;
+}
+.oi-suggestion-action {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.oi-suggestion-rationale {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.oi-confidence {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.oi-confidence.high { background: var(--green-dim); color: var(--green); }
+.oi-confidence.medium { background: var(--yellow-dim); color: var(--yellow); }
+.oi-confidence.low { background: rgba(132,142,156,.15); color: var(--text-muted); }
+.oi-direction-bullish { color: var(--green); }
+.oi-direction-bearish { color: var(--red); }
+.oi-direction-neutral { color: var(--text-secondary); }
+
+.oi-collecting {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+  font-size: 13px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/* ── Auth Gate ── */
+.auth-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  gap: 16px;
+}
+.auth-gate-msg {
+  font-size: 15px;
+  color: var(--text-secondary);
+}
+.auth-gate-link {
+  color: var(--cyan);
+  text-decoration: none;
+  font-weight: 600;
+}
+.auth-gate-link:hover { text-decoration: underline; }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .nav { padding: 12px 16px; }
+  .main { padding: 16px; }
+  .nav-user-name { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+<!-- WS reconnect banner -->
+<div class="ws-banner" id="wsBanner">Reconnecting to live feed...</div>
+
+<!-- Nav Bar -->
+<nav class="nav" id="navBar" style="display:none">
+  <a class="nav-brand" href="/">Groww Trade Copier</a>
+  <a class="nav-link" href="/">Dashboard</a>
+  <a class="nav-link active" href="/oi">OI Analytics</a>
+  <span class="nav-spacer"></span>
+  <div class="nav-user">
+    <span class="nav-user-name" id="userName"></span>
+    <button class="btn-logout" onclick="logout()">Logout</button>
+  </div>
+</nav>
+
+<!-- Auth Gate (shown when not master) -->
+<div id="authGate" style="display:none">
+  <div class="auth-gate">
+    <div class="auth-gate-msg">OI Analytics is available for master accounts only.</div>
+    <a class="auth-gate-link" href="/">Back to Dashboard</a>
+  </div>
+</div>
+
+<!-- Main Content -->
+<div id="oiApp" style="display:none">
+<div class="main">
+
+  <!-- OI Analytics Section -->
+  <div class="oi-section">
+    <div class="oi-header">
+      <span class="oi-title">OI Analytics</span>
+      <button class="btn btn-green btn-sm" id="oiStartBtn" onclick="startOI()" style="padding:5px 14px;font-size:12px">Start</button>
+      <button class="btn btn-red btn-sm" id="oiStopBtn" onclick="stopOI()" style="display:none;padding:5px 14px;font-size:12px">Stop</button>
+      <span class="last-updated" id="oiUpdated"></span>
+    </div>
+    <div id="oiTabs" class="oi-tabs" style="display:none"></div>
+    <div id="oiContent">
+      <div class="oi-collecting">OI Analytics is stopped. Click Start to begin collecting data.</div>
+    </div>
+  </div>
+
+  <!-- OI Settings -->
+  <div class="settings-card" id="oiSettingsCard">
+    <div class="settings-card-title">Settings</div>
+    <div id="oiSettingsBody">Loading...</div>
+  </div>
+
+</div>
+</div>
+
+<script>
+const API = '';
+let ws = null;
+let pollTimer = null;
+let currentUser = null;
+
+// ── Helpers ──
+function $(sel) { return document.querySelector(sel); }
+function $$(sel) { return document.querySelectorAll(sel); }
+
+function showToast(msg, type='success') {
+  const c = $('#toastContainer');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+async function api(path, opts) {
+  try {
+    const r = await fetch(API + path, opts);
+    if (r.status === 401) {
+      window.location.href = '/';
+      return null;
+    }
+    if (r.status === 403) return null;
+    return await r.json();
+  } catch (e) {
+    console.error(`API ${path}:`, e);
+    return null;
+  }
+}
+
+// ── Auth ──
+async function checkAuth() {
+  try {
+    const r = await fetch('/api/me');
+    if (r.status === 401) {
+      window.location.href = '/';
+      return;
+    }
+    currentUser = await r.json();
+    if (currentUser.role !== 'master') {
+      $('#authGate').style.display = '';
+      return;
+    }
+    showApp();
+  } catch {
+    window.location.href = '/';
+  }
+}
+
+function showApp() {
+  $('#navBar').style.display = '';
+  $('#oiApp').style.display = '';
+  $('#userName').textContent = currentUser.name;
+  refreshAll();
+  connectWS();
+  pollTimer = setInterval(refreshAll, 10000);
+  loadOISettings();
+}
+
+function logout() {
+  window.location.href = '/api/logout';
+}
+
+// ── OI Analytics ──
+let oiData = {};
+let oiActiveTab = '';
+
+function formatOI(n) {
+  if (n == null) return '-';
+  const abs = Math.abs(n);
+  if (abs >= 1e7) return (n / 1e7).toFixed(2) + 'Cr';
+  if (abs >= 1e5) return (n / 1e5).toFixed(2) + 'L';
+  if (abs >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return n.toLocaleString('en-IN');
+}
+
+function signalClass(signal) {
+  const map = {
+    'Long Buildup': 'signal-long-buildup',
+    'Short Buildup': 'signal-short-buildup',
+    'Long Unwinding': 'signal-long-unwinding',
+    'Short Covering': 'signal-short-covering',
+  };
+  return map[signal] || '';
+}
+
+async function refreshOIStatus() {
+  const d = await api('/api/oi/status');
+  if (!d) return;
+  if (d.running) {
+    $('#oiStartBtn').style.display = 'none';
+    $('#oiStopBtn').style.display = '';
+  } else {
+    $('#oiStartBtn').style.display = '';
+    $('#oiStopBtn').style.display = 'none';
+  }
+}
+
+async function refreshOIAnalysis() {
+  const d = await api('/api/oi/analysis');
+  if (!d) return;
+  oiData = d;
+  const instruments = Object.keys(d);
+  if (instruments.length === 0) {
+    $('#oiTabs').style.display = 'none';
+    $('#oiContent').innerHTML = '<div class="oi-collecting">Collecting data... Full analysis will appear after the first poll completes.</div>';
+    return;
+  }
+  if (!oiActiveTab || !instruments.includes(oiActiveTab)) {
+    oiActiveTab = instruments[0];
+  }
+  renderOITabs(instruments);
+  renderOIContent(oiData[oiActiveTab]);
+}
+
+function renderOITabs(instruments) {
+  const el = $('#oiTabs');
+  if (instruments.length <= 1) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'flex';
+  el.innerHTML = instruments.map(u =>
+    `<button class="oi-tab ${u === oiActiveTab ? 'active' : ''}" onclick="switchOITab('${u}')">${u}</button>`
+  ).join('');
+}
+
+function switchOITab(underlying) {
+  oiActiveTab = underlying;
+  const instruments = Object.keys(oiData);
+  renderOITabs(instruments);
+  if (oiData[underlying]) renderOIContent(oiData[underlying]);
+}
+
+function renderOIContent(a) {
+  if (!a) {
+    $('#oiContent').innerHTML = '<div class="oi-collecting">No data yet.</div>';
+    return;
+  }
+  const sentClass = (a.sentiment || '').toLowerCase();
+  const hasPrev = a.has_prev_data;
+  let html = '';
+
+  // Summary grid
+  html += `<div class="oi-summary-grid">
+    <div class="oi-summary-card">
+      <div class="oi-summary-label">LTP</div>
+      <div class="oi-summary-value">${a.underlying_ltp ? a.underlying_ltp.toLocaleString('en-IN', {maximumFractionDigits:1}) : '-'}</div>
+    </div>
+    <div class="oi-summary-card">
+      <div class="oi-summary-label">PCR</div>
+      <div class="oi-summary-value" style="color:${a.pcr > 1.2 ? 'var(--green)' : a.pcr < 0.7 ? 'var(--red)' : 'var(--text-primary)'}">${a.pcr ? a.pcr.toFixed(3) : '-'}</div>
+    </div>
+    <div class="oi-summary-card">
+      <div class="oi-summary-label">Max Pain</div>
+      <div class="oi-summary-value">${a.max_pain ? a.max_pain.toLocaleString('en-IN') : '-'}</div>
+    </div>
+    <div class="oi-summary-card">
+      <div class="oi-summary-label">Sentiment</div>
+      <div><span class="oi-sentiment ${sentClass}">${a.sentiment || '-'}</span></div>
+    </div>
+    <div class="oi-summary-card">
+      <div class="oi-summary-label">Support</div>
+      <div class="oi-summary-value" style="color:var(--green)">${a.support_level ? a.support_level.toLocaleString('en-IN') : '-'}</div>
+    </div>
+    <div class="oi-summary-card">
+      <div class="oi-summary-label">Resistance</div>
+      <div class="oi-summary-value" style="color:var(--red)">${a.resistance_level ? a.resistance_level.toLocaleString('en-IN') : '-'}</div>
+    </div>
+  </div>`;
+
+  if (!hasPrev) {
+    html += '<div class="oi-collecting">Collecting data... Buildup signals and trade suggestions will appear after the next poll cycle.</div>';
+    $('#oiContent').innerHTML = html;
+    if (a.timestamp) $('#oiUpdated').textContent = 'Exp: ' + a.expiry + ' | ' + new Date(a.timestamp).toLocaleTimeString();
+    return;
+  }
+
+  // Buildup Signals table
+  html += `<div class="panel" style="margin-bottom:16px">
+    <div class="panel-header">
+      <span class="panel-title">Buildup Signals</span>
+      <span class="panel-count">${(a.buildup_signals || []).length}</span>
+    </div>
+    <div class="panel-body" style="max-height:300px">`;
+  if (a.buildup_signals && a.buildup_signals.length > 0) {
+    html += `<table><thead><tr>
+      <th>Strike</th><th>Type</th><th>Signal</th><th>OI Change</th><th>OI %</th><th>LTP</th>
+    </tr></thead><tbody>`;
+    html += a.buildup_signals.map(s => `<tr>
+      <td>${s.strike ? s.strike.toLocaleString('en-IN') : '-'}</td>
+      <td>${s.type}</td>
+      <td class="${signalClass(s.signal)}">${s.signal}</td>
+      <td style="color:${s.oi_change > 0 ? 'var(--green)' : 'var(--red)'}">${s.oi_change > 0 ? '+' : ''}${formatOI(s.oi_change)}</td>
+      <td>${s.oi_pct > 0 ? '+' : ''}${s.oi_pct}%</td>
+      <td>${s.ltp ? s.ltp.toFixed(2) : '-'}</td>
+    </tr>`).join('');
+    html += '</tbody></table>';
+  } else {
+    html += '<div class="empty-state">No significant buildup detected</div>';
+  }
+  html += '</div></div>';
+
+  // Two-column: Unusual Activity + Trade Suggestions
+  html += '<div class="oi-grid-2">';
+
+  // Unusual Activity
+  html += '<div><div class="panel-title" style="margin-bottom:10px;font-size:14px">Unusual Activity</div>';
+  if (a.unusual_activity && a.unusual_activity.length > 0) {
+    html += a.unusual_activity.map(u => {
+      const dir = u.direction === 'Added' ? 'added' : 'reduced';
+      return `<div class="oi-unusual-card ${dir}">
+        <div class="oi-unusual-header">
+          <span class="oi-unusual-strike">${u.strike ? u.strike.toLocaleString('en-IN') : '-'} ${u.type}</span>
+          <span class="oi-unusual-ratio">${u.ratio}x avg</span>
+        </div>
+        <div class="oi-unusual-detail">
+          OI ${u.direction}: <strong style="color:${u.oi_change > 0 ? 'var(--green)' : 'var(--red)'}">${u.oi_change > 0 ? '+' : ''}${formatOI(u.oi_change)}</strong>
+          (${u.oi_pct > 0 ? '+' : ''}${u.oi_pct}%) | Current: ${formatOI(u.current_oi)} | LTP: ${u.ltp ? u.ltp.toFixed(2) : '-'}
+        </div>
+      </div>`;
+    }).join('');
+  } else {
+    html += '<div class="oi-collecting" style="padding:16px">No unusual activity detected</div>';
+  }
+  html += '</div>';
+
+  // Trade Suggestions
+  html += '<div><div class="panel-title" style="margin-bottom:10px;font-size:14px">Trade Suggestions</div>';
+  if (a.trade_suggestions && a.trade_suggestions.length > 0) {
+    html += a.trade_suggestions.map(s => {
+      const dirClass = 'oi-direction-' + (s.direction || 'neutral').toLowerCase();
+      const confClass = (s.confidence || 'low').toLowerCase();
+      return `<div class="oi-suggestion-card">
+        <div class="oi-suggestion-action">
+          <span class="${dirClass}">${s.action}</span>
+          <span class="oi-confidence ${confClass}">${s.confidence}</span>
+        </div>
+        <div class="oi-suggestion-rationale">${s.rationale}</div>
+      </div>`;
+    }).join('');
+  } else {
+    html += '<div class="oi-collecting" style="padding:16px">Waiting for sufficient data to generate suggestions</div>';
+  }
+  html += '</div></div>';
+
+  $('#oiContent').innerHTML = html;
+  if (a.timestamp) $('#oiUpdated').textContent = 'Exp: ' + a.expiry + ' | ' + new Date(a.timestamp).toLocaleTimeString();
+}
+
+async function startOI() {
+  await api('/api/oi/start', { method: 'POST' });
+  showToast('OI Analytics started', 'success');
+  refreshOIStatus();
+  setTimeout(refreshOIAnalysis, 5000);
+}
+
+async function stopOI() {
+  await api('/api/oi/stop', { method: 'POST' });
+  showToast('OI Analytics stopped', 'info');
+  refreshOIStatus();
+}
+
+// ── OI Settings ──
+async function loadOISettings() {
+  const s = await api('/api/settings');
+  if (!s) return;
+  const cfg = s.oi_analytics || {};
+  $('#oiSettingsBody').innerHTML = renderOISettingsHtml(cfg);
+}
+
+function renderOISettingsHtml(cfg) {
+  const instruments = (cfg.instruments || []).join(', ');
+  const enabled = cfg.enabled || false;
+  const interval = cfg.poll_interval_seconds || 180;
+  const threshold = cfg.unusual_oi_threshold || 2.0;
+  return `
+    <div class="toggle-row" style="margin-bottom:12px">
+      <span class="toggle-label">Auto-start on boot</span>
+      <div class="toggle ${enabled ? 'on' : ''}" id="sOiEnabled" onclick="this.classList.toggle('on')"></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Instruments (comma-separated)</label>
+      <input class="form-input" id="sOiInstruments" value="${instruments}" placeholder="NIFTY, BANKNIFTY" />
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Poll Interval (sec)</label>
+        <input class="form-input" id="sOiInterval" type="number" min="60" step="30" value="${interval}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Unusual OI Threshold</label>
+        <input class="form-input" id="sOiThreshold" type="number" min="1" step="0.1" value="${threshold}" />
+      </div>
+    </div>
+    <button class="btn btn-green" style="width:100%;margin-top:8px" onclick="saveOISettings()">Save OI Settings</button>
+  `;
+}
+
+async function saveOISettings() {
+  const body = {
+    enabled: $('#sOiEnabled').classList.contains('on'),
+    instruments: $('#sOiInstruments').value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean),
+    poll_interval_seconds: parseInt($('#sOiInterval').value) || 180,
+    unusual_oi_threshold: parseFloat($('#sOiThreshold').value) || 2.0,
+  };
+  const r = await api('/api/settings/oi-analytics', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  showToast(r ? 'OI settings saved' : 'Failed to save', r ? 'success' : 'error');
+}
+
+// ── WebSocket ──
+function connectWS() {
+  if (ws) return;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => { $('#wsBanner').style.display = 'none'; };
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'oi_update' && data.data) {
+        oiData = data.data;
+        const instruments = Object.keys(oiData);
+        if (instruments.length === 0) return;
+        if (!oiActiveTab || !instruments.includes(oiActiveTab)) {
+          oiActiveTab = instruments[0];
+        }
+        renderOITabs(instruments);
+        renderOIContent(oiData[oiActiveTab]);
+      }
+    } catch {}
+  };
+  ws.onclose = () => { ws = null; $('#wsBanner').style.display = ''; setTimeout(connectWS, 3000); };
+  ws.onerror = () => ws.close();
+}
+
+// ── Refresh All ──
+function refreshAll() {
+  if (!currentUser) return;
+  refreshOIStatus();
+  refreshOIAnalysis();
+}
+
+// ── Init ──
+checkAuth();
+</script>
+</body>
+</html>

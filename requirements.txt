@@ -1,0 +1,7 @@
+growwapi
+pyotp
+fastapi
+uvicorn[standard]
+websockets
+aiogram
+pyjwt
