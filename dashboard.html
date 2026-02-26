@@ -977,7 +977,6 @@ tbody tr:last-child td { border-bottom: none; }
     <span id="masterControls" style="display:none">
       <button class="btn btn-green" id="startBtn" onclick="startCopier()">Start</button>
       <button class="btn btn-red" id="stopBtn" onclick="stopCopier()" style="display:none">Stop</button>
-      <button class="btn btn-ghost" id="dryRunBtn" onclick="toggleDryRun()" title="Toggle dry run mode">Dry Run: ON</button>
     </span>
     <button class="sound-toggle" id="soundToggle" onclick="toggleSound()" title="Sound alerts">&#x1f508;</button>
     <button class="btn-icon" onclick="refreshAll()" title="Refresh">&#x21bb;</button>
@@ -996,8 +995,8 @@ tbody tr:last-child td { border-bottom: none; }
   <span id="masterControlsMobile" style="display:none">
     <button class="btn btn-green" style="width:100%" onclick="startCopier();toggleMobileMenu()">Start</button>
     <button class="btn btn-red" style="width:100%" onclick="stopCopier();toggleMobileMenu()">Stop</button>
-    <button class="btn btn-ghost" style="width:100%" onclick="toggleDryRun();toggleMobileMenu()">Dry Run</button>
   </span>
+  <a id="oiLinkMobile" href="/oi" class="btn btn-ghost" style="display:none;width:100%;text-align:center;text-decoration:none;color:var(--cyan)">OI Analytics</a>
   <button class="btn btn-ghost" style="width:100%" onclick="toggleSound();toggleMobileMenu()">Toggle Sound</button>
   <button class="btn btn-ghost" style="width:100%" onclick="refreshAll();toggleMobileMenu()">Refresh</button>
   <button class="btn btn-ghost" style="width:100%" onclick="openSettings();toggleMobileMenu()">Settings</button>
@@ -1323,12 +1322,14 @@ function showDashboard() {
     $('#statsBar').style.display = '';
     $('#followerNamesSection').style.display = '';
     $('#oiLink').style.display = '';
+    $('#oiLinkMobile').style.display = '';
     $('#ordersPanelTitle').textContent = 'Master FNO Orders';
   } else {
     $('#masterControls').style.display = 'none';
     $('#statsBar').style.display = 'none';
     $('#followerNamesSection').style.display = 'none';
     $('#oiLink').style.display = 'none';
+    $('#oiLinkMobile').style.display = 'none';
     $('#ordersPanelTitle').textContent = 'My FNO Orders';
   }
 
