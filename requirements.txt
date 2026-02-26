@@ -5,3 +5,6 @@ uvicorn[standard]
 websockets
 aiogram
 pyjwt
+yfinance
+mplfinance
+matplotlib

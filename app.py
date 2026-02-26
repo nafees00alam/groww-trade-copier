@@ -3,6 +3,7 @@ Groww F&O Trade Copier — Web Dashboard
 FastAPI app with background copier + REST API + WebSocket + Telegram auth
 """
 
+import io
 import json
 import time
 import math
@@ -10,7 +11,7 @@ import uuid
 import asyncio
 import logging
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, asdict
 
@@ -25,7 +26,7 @@ from growwapi import GrowwAPI, GrowwFeed
 
 
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, BufferedInputFile
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -149,6 +150,12 @@ class AppState:
         self.bot_instance: Bot | None = None  # Telegram bot for signal delivery
         self.hourly_scan_running = False
         self.hourly_scan_task: asyncio.Task | None = None
+        # Track last scan messages per chat for cleanup: {chat_id: [message_ids]}
+        self.scan_msg_ids: dict[int, list[int]] = {}
+        # Scalp scanner
+        self.scalp_running = False
+        self.scalp_task: asyncio.Task | None = None
+        self.scalp_msg_ids: dict[int, list[int]] = {}  # chat_id -> [msg_ids] for cleanup
 
 
     def add_log(self, event: str, symbol: str = "", follower: str = "",
@@ -319,7 +326,7 @@ async def cmd_start(message: Message):
 
 @tg_router.message(Command("scan"))
 async def cmd_scan(message: Message):
-    """On-demand Greeks scan for followers — show market snapshot without waiting for signals."""
+    """Show scan menu with inline buttons to pick which index to scan."""
     telegram_id = message.from_user.id
     user_info = resolve_telegram_user(telegram_id)
     if not user_info:
@@ -328,36 +335,145 @@ async def cmd_scan(message: Message):
     if user_info["role"] == "master":
         await message.answer("Use the dashboard for scans. This command is for followers.")
         return
-
     if not state.master_client:
         await message.answer("Master account not connected. Scan unavailable.")
         return
 
-    await message.answer("📡 Scanning chart + Greeks... please wait.")
+    chat_id = message.chat.id
+    # Delete old scans + the /scan command message itself
+    await _delete_old_scans(state.bot_instance or message.bot, chat_id)
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
-    for underlying in GREEKS_UNDERLYINGS:
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📊 NIFTY", callback_data="scan:NIFTY"),
+            InlineKeyboardButton(text="🏦 BANKNIFTY", callback_data="scan:BANKNIFTY"),
+            InlineKeyboardButton(text="📈 SENSEX", callback_data="scan:SENSEX"),
+        ],
+        [InlineKeyboardButton(text="🔄 Scan All", callback_data="scan:ALL")],
+    ])
+    menu_msg = await message.answer("📡 <b>Select index to scan:</b>", parse_mode="HTML", reply_markup=kb)
+    # Track menu message so it gets deleted on next scan
+    state.scan_msg_ids[chat_id] = [menu_msg.message_id]
+
+
+async def _delete_old_scans(bot_inst, chat_id: int):
+    """Delete previous scan messages for this chat to reduce spam."""
+    old_ids = state.scan_msg_ids.pop(chat_id, [])
+    for mid in old_ids:
         try:
-            # Fetch Greeks and chart in parallel
-            snapshot, chart = await asyncio.gather(
-                asyncio.to_thread(scan_greeks_for_underlying, state.master_client, underlying),
-                asyncio.to_thread(_get_chart_analysis, underlying),
-            )
-            if not snapshot:
-                await message.answer(f"{underlying}: No data available.")
-                continue
+            await bot_inst.delete_message(chat_id, mid)
+        except Exception:
+            pass  # message already deleted or too old
 
-            hist = state.greeks_history.get(underlying, [])
-            text, trade_info = _format_scan_summary(underlying, snapshot, hist, chart=chart)
-            kb = None
-            if trade_info:
-                kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="✅ Quick Trade", callback_data=trade_info["cb_trade"]),
-                    InlineKeyboardButton(text="❌ Skip", callback_data=trade_info["cb_skip"]),
-                ]])
-            await message.answer(text, parse_mode="HTML", reply_markup=kb)
-        except Exception as e:
-            log.error(f"Scan command error for {underlying}: {e}")
-            await message.answer(f"{underlying}: Scan failed — {e}")
+
+def _scan_menu_row() -> list[InlineKeyboardButton]:
+    """Inline button row: NIFTY | BANKNIFTY | SENSEX."""
+    return [
+        InlineKeyboardButton(text="📊 NIFTY", callback_data="scan:NIFTY"),
+        InlineKeyboardButton(text="🏦 BANKNIFTY", callback_data="scan:BANKNIFTY"),
+        InlineKeyboardButton(text="📈 SENSEX", callback_data="scan:SENSEX"),
+    ]
+
+
+async def _send_scan(bot_inst, chat_id: int, underlying: str, last: bool = False, source: str = "manual"):
+    """Run scan for one underlying, send chart image + text result.
+    Returns list of message_ids (may be 1 or 2) or empty list on error.
+    If last=True, append the scan menu buttons at the bottom.
+    source: 'manual' | 'hourly' for message header."""
+    try:
+        snapshot, chart = await asyncio.gather(
+            asyncio.to_thread(scan_greeks_for_underlying, state.master_client, underlying),
+            asyncio.to_thread(_get_chart_analysis, underlying),
+        )
+        if not snapshot:
+            msg = await bot_inst.send_message(chat_id, f"{underlying}: No data available.")
+            return [msg.message_id]
+
+        hist = state.greeks_history.get(underlying, [])
+        text, trade_info = _format_scan_summary(underlying, snapshot, hist, chart=chart, source=source)
+
+        # Compute S/R and ATM for chart image (same logic as _format_scan_summary)
+        cfg = GREEKS_UNDERLYINGS[underlying]
+        idx_data = state.index_data.get(cfg["index_token"], {})
+        underlying_ltp = float(idx_data.get("value", idx_data.get("ltp", idx_data.get("lastTradedPrice", 0))) or 0)
+        step = cfg["step"]
+        atm = round(underlying_ltp / step) * step if underlying_ltp else 0
+        support = resistance = 0.0
+        if underlying_ltp > 0:
+            oi_snap = _snapshot_to_oi(underlying, snapshot, underlying_ltp)
+            support, resistance = find_support_resistance(oi_snap)
+
+        msg_ids = []
+
+        # Generate and send chart image
+        chart_bytes = await asyncio.to_thread(
+            _generate_chart_image, underlying, support, resistance, atm, chart
+        )
+        if chart_bytes:
+            try:
+                photo_msg = await bot_inst.send_photo(
+                    chat_id, BufferedInputFile(chart_bytes, filename=f"{underlying}_chart.png")
+                )
+                msg_ids.append(photo_msg.message_id)
+            except Exception as e:
+                log.warning(f"Failed to send chart photo for {underlying}: {e}")
+
+        # Send text message with buttons
+        rows = []
+        if trade_info:
+            rows.append([
+                InlineKeyboardButton(text="✅ Quick Trade", callback_data=trade_info["cb_trade"]),
+                InlineKeyboardButton(text="❌ Skip", callback_data=trade_info["cb_skip"]),
+            ])
+        if last:
+            rows.append(_scan_menu_row())
+            rows.append([InlineKeyboardButton(text="🔄 Scan All", callback_data="scan:ALL")])
+        kb = InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
+        msg = await bot_inst.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+        msg_ids.append(msg.message_id)
+        return msg_ids
+    except Exception as e:
+        log.error(f"Scan error for {underlying}: {e}")
+        return []
+
+
+@tg_router.callback_query(F.data.startswith("scan:"))
+async def cb_scan_index(cb: CallbackQuery):
+    """Handle scan menu button click — run scan for selected index."""
+    telegram_id = cb.from_user.id
+    user_info = resolve_telegram_user(telegram_id)
+    if not user_info:
+        await cb.answer("Access denied.", show_alert=True)
+        return
+    if not state.master_client:
+        await cb.answer("Master not connected.", show_alert=True)
+        return
+
+    choice = cb.data.split(":", 1)[1]
+    await cb.answer("Scanning...")
+    chat_id = cb.message.chat.id
+
+    # Delete old scan messages + the menu message
+    await _delete_old_scans(state.bot_instance, chat_id)
+    try:
+        await cb.message.delete()
+    except Exception:
+        pass
+
+    targets = [u for u in (list(GREEKS_UNDERLYINGS.keys()) if choice == "ALL" else [choice]) if u in GREEKS_UNDERLYINGS]
+    new_ids = []
+
+    for i, underlying in enumerate(targets):
+        is_last = (i == len(targets) - 1)
+        mids = await _send_scan(state.bot_instance, chat_id, underlying, last=is_last)
+        new_ids.extend(mids)
+
+    # Track new message IDs for future cleanup
+    state.scan_msg_ids[chat_id] = new_ids
 
 
 @tg_router.message(Command("login"))
@@ -1124,7 +1240,7 @@ def copy_order_to_follower(follower_client: GrowwAPI, follower: AccountConfig, o
     }
 
     segment_str = order.get("segment", "FNO").upper()
-    product_str = order.get("product", "MIS").upper()
+    product_str = order.get("product", "NRML").upper()
     exchange_str = order.get("exchange", "NSE").upper()
 
     exchange_map = {
@@ -1244,25 +1360,34 @@ def _get_oi_config() -> dict:
 def fetch_option_chain(client: GrowwAPI, underlying: str, exchange: str = "NSE") -> OISnapshot | None:
     """Fetch option chain for underlying, pick nearest expiry, return OISnapshot."""
     try:
-        expiries = client.get_expiries(exchange, underlying)
-        if not expiries:
-            log.warning(f"OI: No expiries for {underlying}")
-            return None
+        # Try get_expiries first, fall back to calculated expiry
+        chosen = None
+        try:
+            expiries = client.get_expiries(exchange, underlying)
+            if expiries:
+                from datetime import date
+                today = date.today()
+                today_str = today.strftime("%Y-%m-%d")
+                valid = [e for e in expiries if e >= today_str]
+                if not valid:
+                    valid = expiries[-1:]
+                chosen = valid[0]
+                if chosen == today_str and len(valid) > 1:
+                    chosen = valid[1]
+        except Exception:
+            pass  # get_expiries forbidden for some indices, use calculated expiry
 
-        # expiries is a list of date strings; pick nearest future
-        from datetime import date
-        today = date.today()
-        today_str = today.strftime("%Y-%m-%d")
-
-        # Filter to future/current expiries
-        valid = [e for e in expiries if e >= today_str]
-        if not valid:
-            valid = expiries[-1:]  # fallback to last
-
-        # On expiry day (Thursday), prefer next week if available
-        chosen = valid[0]
-        if chosen == today_str and len(valid) > 1:
-            chosen = valid[1]
+        if not chosen:
+            # Use calculated expiry based on GREEKS_UNDERLYINGS config
+            cfg = GREEKS_UNDERLYINGS.get(underlying, {})
+            if cfg:
+                chosen = _get_nearest_weekly_expiry(underlying)
+            else:
+                # Default Thursday for unknown underlyings
+                from datetime import date
+                today = date.today()
+                days_ahead = (3 - today.weekday()) % 7
+                chosen = (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
 
         chain = client.get_option_chain(exchange, underlying, chosen)
         if not chain:
@@ -1647,22 +1772,51 @@ async def oi_polling_loop():
 # Underlying configs — Greeks API only works for SENSEX currently
 # NIFTY/BANKNIFTY return null Greeks from Groww API
 GREEKS_UNDERLYINGS = {
-    "SENSEX": {"exchange": "BSE", "index_token": "1", "step": 100, "lot": 20},
+    "SENSEX": {"exchange": "BSE", "index_token": "1", "step": 100, "lot": 20, "expiry_weekday": 3},
+    "NIFTY": {"exchange": "NSE", "index_token": "NIFTY", "step": 50, "lot": 65, "expiry_weekday": 0},
+    "BANKNIFTY": {"exchange": "NSE", "index_token": "26009", "step": 100, "lot": 30, "expiry_monthly": True},
 }
 
 IST = timezone(timedelta(hours=5, minutes=30))
+_monthly_expiry_cache: dict[str, date] = {}  # underlying -> confirmed expiry date
 
 
 def _get_nearest_weekly_expiry(underlying: str) -> str:
-    """Return nearest weekly expiry date as YYYY-MM-DD.
+    """Return nearest expiry date as YYYY-MM-DD.
 
-    All index weekly options expire on Thursday.
-    If today is Thursday and past 15:30 IST, use next Thursday.
+    Expiry days differ per index:
+      SENSEX: Thursday (3)
+      NIFTY: Monday (0)
+      BANKNIFTY: Monthly — last trading day of month (approx last Thu/Fri)
+    If today is expiry day and past 15:30 IST, use next period.
     """
     now_ist = datetime.now(IST)
     today = now_ist.date()
 
-    expiry_weekday = 3  # Thursday for all
+    cfg = GREEKS_UNDERLYINGS.get(underlying, {})
+
+    # Monthly expiry: NSE-designated date (not always last weekday of month).
+    # Return cached expiry if available, otherwise return best guess — the actual
+    # scan function will probe nearby dates if this one returns 0 strikes.
+    if cfg.get("expiry_monthly"):
+        cached = _monthly_expiry_cache.get(underlying)
+        if cached and cached >= today:
+            return cached.strftime("%Y-%m-%d")
+        # Best guess: last weekday of next month (current month likely expired already)
+        import calendar
+        year, month = today.year, today.month
+        for m_offset in range(3):
+            y = year + (month + m_offset - 1) // 12
+            m = (month + m_offset - 1) % 12 + 1
+            last_day = calendar.monthrange(y, m)[1]
+            d = date(y, m, last_day)
+            while d.weekday() >= 5:
+                d -= timedelta(days=1)
+            if d >= today:
+                return d.strftime("%Y-%m-%d")
+        return (today + timedelta(days=30)).strftime("%Y-%m-%d")
+
+    expiry_weekday = cfg.get("expiry_weekday", 3)  # default Thursday
 
     days_ahead = (expiry_weekday - today.weekday()) % 7
     if days_ahead == 0:
@@ -1835,6 +1989,39 @@ def scan_greeks_for_underlying(client: GrowwAPI, underlying: str) -> dict:
 
     underlying_ltp = float(chain.get("underlying_ltp", 0) or 0)
     strikes_raw = chain.get("strikes", {})
+
+    # For monthly expiry: probe end-of-month dates if initial guess returns 0 strikes
+    if not strikes_raw and cfg.get("expiry_monthly"):
+        import calendar
+        now_date = datetime.now(IST).date()
+        found = False
+        for m_offset in range(3):
+            y = now_date.year + (now_date.month + m_offset - 1) // 12
+            m = (now_date.month + m_offset - 1) % 12 + 1
+            last_day = calendar.monthrange(y, m)[1]
+            # Probe last 5 weekdays of each month
+            for day_off in range(8):
+                probe = date(y, m, last_day) - timedelta(days=day_off)
+                if probe < now_date or probe.weekday() >= 5:
+                    continue
+                probe_str = probe.strftime("%Y-%m-%d")
+                try:
+                    chain2 = client.get_option_chain(exchange, underlying, probe_str)
+                    s2 = chain2.get("strikes", {}) if isinstance(chain2, dict) else {}
+                    if s2:
+                        log.info(f"Greeks: found {underlying} monthly expiry at {probe_str} ({len(s2)} strikes)")
+                        _monthly_expiry_cache[underlying] = probe
+                        chain = chain2
+                        strikes_raw = s2
+                        expiry = probe_str
+                        underlying_ltp = float(chain.get("underlying_ltp", 0) or 0)
+                        found = True
+                        break
+                except Exception:
+                    pass
+            if found:
+                break
+
     if not strikes_raw:
         log.warning(f"Greeks: No strikes in chain for {underlying}")
         return {}
@@ -1884,8 +2071,8 @@ def scan_greeks_for_underlying(client: GrowwAPI, underlying: str) -> dict:
             "pe_oi": int(pe.get("open_interest", 0) or 0),
             "ce_volume": int(ce.get("volume", 0) or 0),
             "pe_volume": int(pe.get("volume", 0) or 0),
-            "ce_symbol": ce.get("trading_symbol", _build_trading_symbol(underlying, expiry, strike_val, "CE")),
-            "pe_symbol": pe.get("trading_symbol", _build_trading_symbol(underlying, expiry, strike_val, "PE")),
+            "ce_symbol": ce.get("trading_symbol") or ce.get("tradingSymbol") or _build_trading_symbol(underlying, expiry, strike_val, "CE"),
+            "pe_symbol": pe.get("trading_symbol") or pe.get("tradingSymbol") or _build_trading_symbol(underlying, expiry, strike_val, "PE"),
             "expiry": expiry,
         }
 
@@ -2214,6 +2401,18 @@ def _score_sell_signal(strike_data: dict, opt_type: str) -> tuple[int, list[str]
 
     return score, reasons
 
+
+# Direction stability lock — prevent scan flip-flop
+# {underlying: (direction "CE"|"PE", score, timestamp)}
+_scan_direction_lock: dict[str, tuple[str, int, float]] = {}
+_DIRECTION_LOCK_SECS = 1800   # 30 min time lock
+_DIRECTION_HYSTERESIS = 15    # new side must lead by 15+ to flip
+_DIRECTION_OVERRIDE_SCORE = 85  # instant flip if new side scores 85+
+
+# Yahoo Finance symbol mapping for chart images
+_YF_SYMBOLS = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "SENSEX": "^BSESN"}
+_chart_img_cache: dict[str, tuple[float, bytes]] = {}  # symbol -> (timestamp, png_bytes)
+_CHART_IMG_TTL = 300  # 5 minutes
 
 # TradingView symbol mapping for chart analysis
 _TV_SYMBOLS = {
@@ -2546,9 +2745,372 @@ def _detect_breakout(chart: dict, underlying_ltp: float, support: float, resista
     return signals
 
 
+def _calc_chart_sl_tp(
+    pick: str, pick_entry: float, delta: float,
+    underlying_ltp: float, chart: dict | None,
+    support: float, resistance: float, step: float,
+) -> tuple[float, float, float, str, str, str]:
+    """Calculate dynamic SL/TP using ATR + Fibonacci levels from chart data.
+
+    Returns (sl, tp1, tp2, sl_reason, tp1_reason, tp2_reason).
+    Falls back to fixed percentages if chart data is unavailable.
+    """
+    abs_delta = abs(delta) if delta else 0
+
+    # Extract chart indicators
+    h1 = chart.get("1H", {}) if chart else {}
+    daily = chart.get("D", {}) if chart else {}
+    atr_1h = h1.get("atr", 0) or 0
+    bb_upper_d = daily.get("bb_upper", 0) or 0
+    bb_lower_d = daily.get("bb_lower", 0) or 0
+    close_d = daily.get("close", 0) or 0
+
+    # Fallback: no ATR or chart → fixed percentages
+    if not atr_1h or not chart or not underlying_ltp or not abs_delta:
+        sl = round(pick_entry * 0.75, 2)
+        tp1 = round(pick_entry * 1.30, 2)
+        tp2 = round(pick_entry * 1.50, 2)
+        return sl, tp1, tp2, "Fixed 25%", "Fixed 30%", "Fixed 50%"
+
+    # ── SL calculation (underlying-based → option price via delta) ──
+    sl_dist = 1.0 * atr_1h  # 1× ATR on underlying
+    if pick == "CE":
+        # CE SL: underlying drops → clamp at support
+        underlying_sl = underlying_ltp - sl_dist
+        if support > 0:
+            underlying_sl = max(underlying_sl, support - 0.5 * step)
+        sl_dist = abs(underlying_ltp - underlying_sl)
+    else:
+        # PE SL: underlying rises → clamp at resistance
+        underlying_sl = underlying_ltp + sl_dist
+        if resistance > 0:
+            underlying_sl = min(underlying_sl, resistance + 0.5 * step)
+        sl_dist = abs(underlying_sl - underlying_ltp)
+
+    option_sl_move = sl_dist * abs_delta
+    sl = round(pick_entry - option_sl_move, 2)
+
+    # Clamp SL to 15%-40% of entry
+    sl = max(sl, round(pick_entry * 0.60, 2))  # max 40% loss
+    sl = min(sl, round(pick_entry * 0.85, 2))  # min 15% loss
+
+    sl_anchor = ""
+    if pick == "CE" and support > 0:
+        sl_anchor = f" + S {support:,.0f}"
+    elif pick == "PE" and resistance > 0:
+        sl_anchor = f" + R {resistance:,.0f}"
+    sl_reason = f"ATR{sl_anchor}"
+
+    # ── TP calculation (ATR + Fibonacci) ──
+    # Fibonacci range from BB or S/R
+    if bb_upper_d > 0 and bb_lower_d > 0:
+        fib_range = bb_upper_d - bb_lower_d
+        fib_base = close_d if close_d > 0 else underlying_ltp
+    elif resistance > 0 and support > 0:
+        fib_range = resistance - support
+        fib_base = underlying_ltp
+    else:
+        fib_range = 0
+        fib_base = underlying_ltp
+
+    if fib_range > 0 and fib_base > 0:
+        # Fibonacci distances on underlying
+        if pick == "CE":
+            fib_382_dist = 0.382 * fib_range
+            fib_618_dist = 0.618 * fib_range
+        else:
+            fib_382_dist = 0.382 * fib_range
+            fib_618_dist = 0.618 * fib_range
+
+        # TP1: conservative — min of 1.5×ATR or fib 38.2%
+        tp1_underlying_dist = min(1.5 * atr_1h, fib_382_dist)
+        # TP2: stretch — min of 2.5×ATR or fib 61.8%
+        tp2_underlying_dist = min(2.5 * atr_1h, fib_618_dist)
+
+        # Cap at resistance (CE) or support (PE)
+        if pick == "CE" and resistance > 0:
+            max_move = max(resistance - underlying_ltp, 0.5 * atr_1h)
+            tp1_underlying_dist = min(tp1_underlying_dist, max_move)
+            tp2_underlying_dist = min(tp2_underlying_dist, max_move * 1.3)
+        elif pick == "PE" and support > 0:
+            max_move = max(underlying_ltp - support, 0.5 * atr_1h)
+            tp1_underlying_dist = min(tp1_underlying_dist, max_move)
+            tp2_underlying_dist = min(tp2_underlying_dist, max_move * 1.3)
+
+        # Convert to option price
+        tp1 = round(pick_entry + tp1_underlying_dist * abs_delta, 2)
+        tp2 = round(pick_entry + tp2_underlying_dist * abs_delta, 2)
+        tp1_reason = "Fib 38.2%"
+        tp2_reason = "Fib 61.8%"
+    else:
+        # No fib data, use ATR only
+        tp1 = round(pick_entry + 1.5 * atr_1h * abs_delta, 2)
+        tp2 = round(pick_entry + 2.5 * atr_1h * abs_delta, 2)
+        tp1_reason = "1.5× ATR"
+        tp2_reason = "2.5× ATR"
+
+    # Clamp TP1 to 20%-60% of entry
+    tp1 = max(tp1, round(pick_entry * 1.20, 2))
+    tp1 = min(tp1, round(pick_entry * 1.60, 2))
+    # Clamp TP2 to 30%-100% of entry
+    tp2 = max(tp2, round(pick_entry * 1.30, 2))
+    tp2 = min(tp2, round(pick_entry * 2.00, 2))
+    # Ensure TP2 > TP1
+    if tp2 <= tp1:
+        tp2 = round(tp1 * 1.15, 2)
+
+    return sl, tp1, tp2, sl_reason, tp1_reason, tp2_reason
+
+
+def _generate_chart_image(underlying: str, support: float, resistance: float,
+                          atm: float, chart: dict | None = None) -> bytes | None:
+    """Generate a candlestick chart image with S/R, BB, Fib, EMA/SMA overlays.
+    Returns PNG bytes or None on any error."""
+    try:
+        import yfinance as yf
+        import mplfinance as mpf
+        import matplotlib
+        matplotlib.use("Agg")
+
+        yf_sym = _YF_SYMBOLS.get(underlying)
+        if not yf_sym:
+            return None
+
+        # Check cache
+        cached = _chart_img_cache.get(underlying)
+        if cached and (time.time() - cached[0]) < _CHART_IMG_TTL:
+            return cached[1]
+
+        # Fetch 5 days of 15-min OHLC
+        df = yf.download(yf_sym, period="5d", interval="15m", progress=False)
+        if df is None or df.empty:
+            return None
+
+        # Flatten multi-level columns if present (yfinance sometimes returns MultiIndex)
+        if hasattr(df.columns, 'levels') and len(df.columns.levels) > 1:
+            df.columns = df.columns.get_level_values(0)
+
+        # Extract Previous Day High/Low/Close and Opening Range before cropping
+        df.index = df.index.tz_localize(None) if df.index.tz is None else df.index.tz_convert(None)
+        dates = df.index.normalize().unique()
+        pdh = pdl = pdc = 0.0
+        or_high = or_low = 0.0
+        if len(dates) >= 2:
+            prev_day = dates[-2]
+            prev_mask = df.index.normalize() == prev_day
+            prev_df = df[prev_mask]
+            if not prev_df.empty:
+                pdh = float(prev_df["High"].max())
+                pdl = float(prev_df["Low"].min())
+                pdc = float(prev_df["Close"].iloc[-1])
+        # Opening range: first 2 candles (30 min) of today
+        if len(dates) >= 1:
+            today = dates[-1]
+            today_df = df[df.index.normalize() == today]
+            if len(today_df) >= 2:
+                or_slice = today_df.iloc[:2]
+                or_high = float(or_slice["High"].max())
+                or_low = float(or_slice["Low"].min())
+
+        # Crop to last ~100 candles for readability
+        df = df.tail(100)
+        if len(df) < 10:
+            return None
+
+        # Build horizontal lines
+        hlines_vals = []
+        hlines_colors = []
+        hlines_styles = []
+        hlines_widths = []
+
+        if support > 0:
+            hlines_vals.append(support)
+            hlines_colors.append("#00e676")
+            hlines_styles.append("dashed")
+            hlines_widths.append(1.2)
+
+        if resistance > 0:
+            hlines_vals.append(resistance)
+            hlines_colors.append("#ff1744")
+            hlines_styles.append("dashed")
+            hlines_widths.append(1.2)
+
+        if atm > 0:
+            hlines_vals.append(atm)
+            hlines_colors.append("#ffffff")
+            hlines_styles.append("dotted")
+            hlines_widths.append(1.0)
+
+        # BB upper/lower from daily chart data
+        if chart:
+            daily = chart.get("D", {})
+            bb_upper = daily.get("bb_upper", 0)
+            bb_lower = daily.get("bb_lower", 0)
+            if bb_upper > 0:
+                hlines_vals.append(bb_upper)
+                hlines_colors.append("#42a5f5")
+                hlines_styles.append("dashed")
+                hlines_widths.append(0.8)
+            if bb_lower > 0:
+                hlines_vals.append(bb_lower)
+                hlines_colors.append("#42a5f5")
+                hlines_styles.append("dashed")
+                hlines_widths.append(0.8)
+
+        # Previous Day High/Low/Close
+        if pdh > 0:
+            hlines_vals.append(pdh)
+            hlines_colors.append("#e040fb")  # purple
+            hlines_styles.append("dashed")
+            hlines_widths.append(0.9)
+        if pdl > 0:
+            hlines_vals.append(pdl)
+            hlines_colors.append("#e040fb")
+            hlines_styles.append("dashed")
+            hlines_widths.append(0.9)
+        if pdc > 0:
+            hlines_vals.append(pdc)
+            hlines_colors.append("#e040fb")
+            hlines_styles.append("dotted")
+            hlines_widths.append(0.7)
+
+        # Opening Range (first 30 min)
+        if or_high > 0:
+            hlines_vals.append(or_high)
+            hlines_colors.append("#ff9100")  # orange
+            hlines_styles.append("dashed")
+            hlines_widths.append(0.9)
+        if or_low > 0:
+            hlines_vals.append(or_low)
+            hlines_colors.append("#ff9100")
+            hlines_styles.append("dashed")
+            hlines_widths.append(0.9)
+
+        # Fibonacci levels between support and resistance
+        fib_levels = []  # (pct, value) for labels
+        if support > 0 and resistance > 0 and resistance > support:
+            fib_range = resistance - support
+            for fib_pct in (0.382, 0.5, 0.618):
+                fib_val = support + fib_range * fib_pct
+                fib_levels.append((fib_pct, fib_val))
+                hlines_vals.append(fib_val)
+                hlines_colors.append("#ffd740")
+                hlines_styles.append("dotted")
+                hlines_widths.append(0.7)
+
+        # Build style
+        style = mpf.make_mpf_style(
+            base_mpf_style="nightclouds",
+            marketcolors=mpf.make_marketcolors(
+                up="#00e676", down="#ff1744",
+                wick={"up": "#00e676", "down": "#ff1744"},
+                edge={"up": "#00e676", "down": "#ff1744"},
+                volume={"up": "#00e676", "down": "#ff1744"},
+            ),
+            facecolor="#1a1a2e",
+            figcolor="#1a1a2e",
+            gridcolor="#2d2d44",
+            gridstyle="--",
+        )
+
+        # Plot kwargs
+        kwargs = dict(
+            type="candle",
+            style=style,
+            volume=False,
+            mav=(20, 50),
+            title=f"\n{underlying} 15m Chart",
+            figsize=(10, 6),
+            tight_layout=True,
+            returnfig=True,
+            warn_too_much_data=200,
+        )
+
+        if hlines_vals:
+            kwargs["hlines"] = dict(
+                hlines=hlines_vals,
+                colors=hlines_colors,
+                linestyle=hlines_styles,
+                linewidths=hlines_widths,
+            )
+
+        fig, axes = mpf.plot(df, **kwargs)
+
+        # Add labels for key levels on the right edge — with de-collision
+        ax = axes[0]
+        x_max = len(df) - 1
+        label_offset = x_max + 1.5
+
+        # Collect all labels: (value, text, color, fontsize, bold)
+        labels = []
+        if support > 0:
+            labels.append((support, f"S {support:,.0f}", "#00e676", 7, True))
+        if resistance > 0:
+            labels.append((resistance, f"R {resistance:,.0f}", "#ff1744", 7, True))
+        if atm > 0:
+            labels.append((atm, f"ATM {atm:,.0f}", "#ffffff", 7, True))
+        if pdh > 0:
+            labels.append((pdh, f"PDH {pdh:,.0f}", "#e040fb", 6, False))
+        if pdl > 0:
+            labels.append((pdl, f"PDL {pdl:,.0f}", "#e040fb", 6, False))
+        if pdc > 0:
+            labels.append((pdc, f"PDC {pdc:,.0f}", "#e040fb", 6, False))
+        if or_high > 0:
+            labels.append((or_high, f"ORH {or_high:,.0f}", "#ff9100", 6, False))
+        if or_low > 0:
+            labels.append((or_low, f"ORL {or_low:,.0f}", "#ff9100", 6, False))
+        for fib_pct, fib_val in fib_levels:
+            labels.append((fib_val, f"F{fib_pct:.0%} {fib_val:,.0f}", "#ffd740", 6, False))
+        if chart:
+            daily = chart.get("D", {})
+            _bb_u = daily.get("bb_upper", 0)
+            _bb_l = daily.get("bb_lower", 0)
+            if _bb_u > 0:
+                labels.append((_bb_u, f"BBU {_bb_u:,.0f}", "#42a5f5", 6, False))
+            if _bb_l > 0:
+                labels.append((_bb_l, f"BBL {_bb_l:,.0f}", "#42a5f5", 6, False))
+
+        # De-collision: sort by value, push overlapping labels apart
+        if labels:
+            labels.sort(key=lambda x: x[0])
+            # Minimum gap in price units — approx 1 text line height
+            y_range = ax.get_ylim()
+            min_gap = (y_range[1] - y_range[0]) * 0.025  # 2.5% of visible range
+
+            placed = []  # y positions after adjustment
+            for i, (val, text, color, fs, bold) in enumerate(labels):
+                y = val
+                # Push up if too close to previous label
+                if placed and y - placed[-1] < min_gap:
+                    y = placed[-1] + min_gap
+                placed.append(y)
+                ax.text(label_offset, y, text, color=color,
+                        fontsize=fs, va="center",
+                        fontweight="bold" if bold else "normal")
+
+        # Save to bytes
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=100, bbox_inches="tight",
+                    facecolor=fig.get_facecolor(), edgecolor="none")
+        matplotlib.pyplot.close(fig)
+        buf.seek(0)
+        png_bytes = buf.getvalue()
+
+        # Cache
+        _chart_img_cache[underlying] = (time.time(), png_bytes)
+        log.info(f"Chart image generated for {underlying} ({len(png_bytes)} bytes)")
+        return png_bytes
+
+    except Exception as e:
+        log.warning(f"Chart image generation failed for {underlying}: {e}")
+        return None
+
+
 def _format_scan_summary(underlying: str, snapshot: dict, history: list[dict],
-                         chart: dict | None = None) -> str:
-    """Format a scan with chart + Greeks trade idea — strike, entry, SL, TP."""
+                         chart: dict | None = None,
+                         source: str = "manual") -> tuple[str, dict | None]:
+    """Format a scan with chart + Greeks trade idea — strike, entry, SL, TP.
+    source: 'manual' (user /scan), 'hourly' (auto hourly), 'signal' (Greeks signal)."""
     cfg = GREEKS_UNDERLYINGS[underlying]
     idx_data = state.index_data.get(cfg["index_token"], {})
     underlying_ltp = float(idx_data.get("value", idx_data.get("ltp", idx_data.get("lastTradedPrice", 0))) or 0)
@@ -2560,7 +3122,7 @@ def _format_scan_summary(underlying: str, snapshot: dict, history: list[dict],
     if atm is None:
         atm = _get_atm_strike(underlying, cfg)
     if atm is None:
-        return f"📊 <b>{underlying} Scan</b>\n\nNo ATM data available."
+        return f"📊 <b>{underlying} Scan</b>\n\nNo ATM data available.", None
 
     # Max pain, support/resistance
     max_pain = 0.0
@@ -2604,24 +3166,45 @@ def _format_scan_summary(underlying: str, snapshot: dict, history: list[dict],
         if pe_score > best_pe_score:
             best_pe_score, best_pe_strike, best_pe_reasons, best_pe_data = pe_score, strike, pe_reasons, data
 
-    # Apply chart alignment — HARD VETO for strong bias, else moderate adjustment
-    if chart_score <= -50:
-        # Strong bearish chart: kill CE, heavily boost PE
-        best_ce_score = 0
-        best_pe_score = min(100, best_pe_score + abs(chart_score) // 3)
-    elif chart_score >= 50:
-        # Strong bullish chart: kill PE, heavily boost CE
-        best_pe_score = 0
-        best_ce_score = min(100, best_ce_score + chart_score // 3)
-    elif chart_score > 0:
-        best_ce_score = min(100, best_ce_score + chart_score // 4)
-        best_pe_score = max(0, best_pe_score - chart_score // 6)
-    elif chart_score < 0:
-        best_pe_score = min(100, best_pe_score + abs(chart_score) // 4)
-        best_ce_score = max(0, best_ce_score - abs(chart_score) // 6)
+    # NO CHART = NO TRADE: cap scores when chart data is unavailable
+    no_chart = not chart
+    if no_chart:
+        best_ce_score = min(best_ce_score, 30)
+        best_pe_score = min(best_pe_score, 30)
 
-    # Pick the stronger direction for trade idea
-    if best_ce_score >= best_pe_score and best_ce_score > 0:
+    # Apply chart alignment — boost aligned direction, penalize opposing
+    # No hard veto — both directions remain viable to avoid flip-flop
+    if chart_score > 0:
+        best_ce_score = min(100, best_ce_score + chart_score // 3)
+        best_pe_score = max(0, best_pe_score - chart_score // 4)
+    elif chart_score < 0:
+        best_pe_score = min(100, best_pe_score + abs(chart_score) // 3)
+        best_ce_score = max(0, best_ce_score - abs(chart_score) // 4)
+
+    # Pick the stronger direction for trade idea (with stability lock)
+    raw_pick = "CE" if (best_ce_score >= best_pe_score and best_ce_score > 0) else "PE"
+    raw_pick_score = best_ce_score if raw_pick == "CE" else best_pe_score
+
+    # Apply direction lock: don't flip unless hysteresis exceeded or time expired or override score
+    lock = _scan_direction_lock.get(underlying)
+    if lock:
+        locked_dir, locked_score, locked_time = lock
+        age = time.time() - locked_time
+        margin = raw_pick_score - (best_pe_score if raw_pick == "CE" else best_ce_score)
+
+        if raw_pick != locked_dir:
+            # Wants to flip — check conditions
+            if raw_pick_score >= _DIRECTION_OVERRIDE_SCORE:
+                pass  # allow flip — very strong signal
+            elif age < _DIRECTION_LOCK_SECS and margin < _DIRECTION_HYSTERESIS:
+                # Lock still active and margin too thin — stay with locked direction
+                raw_pick = locked_dir
+                raw_pick_score = best_ce_score if raw_pick == "CE" else best_pe_score
+
+    # Update lock
+    _scan_direction_lock[underlying] = (raw_pick, raw_pick_score, time.time())
+
+    if raw_pick == "CE" and best_ce_score > 0:
         pick = "CE"
         pick_score = best_ce_score
         pick_strike = best_ce_strike
@@ -2649,18 +3232,25 @@ def _format_scan_summary(underlying: str, snapshot: dict, history: list[dict],
     if chart and aligned:
         pick_score = min(100, pick_score + 5)  # Small bonus for agreement
 
-    # Calculate SL and TP based on entry
+    # Calculate SL and TP — dynamic (ATR + Fibonacci) or fixed fallback
     if pick_entry > 0:
-        sl = round(pick_entry * 0.75, 2)   # 25% SL
-        tp1 = round(pick_entry * 1.30, 2)  # 30% TP1
-        tp2 = round(pick_entry * 1.50, 2)  # 50% TP2
-        sl_pct = 25
+        sl, tp1, tp2, sl_reason, tp1_reason, tp2_reason = _calc_chart_sl_tp(
+            pick=pick, pick_entry=pick_entry, delta=pick_delta,
+            underlying_ltp=underlying_ltp, chart=chart,
+            support=support, resistance=resistance, step=step,
+        )
+        sl_pct = round((pick_entry - sl) / pick_entry * 100, 1) if sl > 0 else 0
+        tp1_pct = round((tp1 - pick_entry) / pick_entry * 100, 1) if tp1 > 0 else 0
+        tp2_pct = round((tp2 - pick_entry) / pick_entry * 100, 1) if tp2 > 0 else 0
         risk_per_lot = round((pick_entry - sl) * lot, 0)
         reward_per_lot = round((tp1 - pick_entry) * lot, 0)
+        rr_ratio = round(reward_per_lot / risk_per_lot, 1) if risk_per_lot > 0 else 0
     else:
         sl = tp1 = tp2 = 0.0
-        sl_pct = 0
+        sl_pct = tp1_pct = tp2_pct = 0
+        sl_reason = tp1_reason = tp2_reason = ""
         risk_per_lot = reward_per_lot = 0
+        rr_ratio = 0
 
     scan_count = len(history)
     ltp_fmt = f"{underlying_ltp:,.0f}" if underlying_ltp else "N/A"
@@ -2701,8 +3291,10 @@ def _format_scan_summary(underlying: str, snapshot: dict, history: list[dict],
     now_ist = datetime.now(IST).strftime("%H:%M")
 
     # ── Build message ──
+    source_icon = "🕐" if source == "hourly" else "📊"
+    source_label = " Hourly" if source == "hourly" else ""
     text = (
-        f"📊 <b>{underlying} Scan</b> — {now_ist} IST\n"
+        f"{source_icon} <b>{underlying}{source_label} Scan</b> — {now_ist} IST\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"LTP: {ltp_fmt} | {trend_arrow} {trend_dir} ({trend_pct:+.2f}%)\n"
         f"Max Pain: {mp_fmt} | S: {s_fmt} | R: {r_fmt}\n\n"
@@ -2726,7 +3318,7 @@ def _format_scan_summary(underlying: str, snapshot: dict, history: list[dict],
         else:
             text += "  ⚠️ Chart vs Greeks DIVERGING\n\n"
     else:
-        text += "📈 Chart: unavailable\n\n"
+        text += "📈 Chart: unavailable\n⚠️ <i>No trade — chart required</i>\n\n"
 
     # Breakout / False Breakout detection
     breakout_signals = _detect_breakout(chart, underlying_ltp, support, resistance, snapshot, history)
@@ -2743,9 +3335,11 @@ def _format_scan_summary(underlying: str, snapshot: dict, history: list[dict],
             f"{pick_emoji} <b>BUY {pick_symbol}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"Strike: {pick_strike} {pick} | Entry: ₹{pick_entry:.2f}\n"
-            f"🛑 SL: ₹{sl:.2f} (-{sl_pct}%)\n"
-            f"🎯 TP1: ₹{tp1:.2f} (+30%) | TP2: ₹{tp2:.2f} (+50%)\n"
-            f"💰 Risk: ₹{risk_per_lot:,.0f} | Reward: ₹{reward_per_lot:,.0f} /lot\n\n"
+            f"Qty: 2 × {lot} = {2 * lot}\n"
+            f"🛑 SL: ₹{sl:.2f} (-{sl_pct}%) ← {sl_reason}\n"
+            f"🎯 TP1: ₹{tp1:.2f} (+{tp1_pct}%) ← {tp1_reason}\n"
+            f"🎯 TP2: ₹{tp2:.2f} (+{tp2_pct}%) ← {tp2_reason}\n"
+            f"R:R 1:{rr_ratio} | 💰 Risk: ₹{risk_per_lot:,.0f}/lot | 2 lots\n\n"
             f"📐 Δ {pick_delta:+.2f} | IV {pick_iv:.1f}% | OI {pick_oi:,}\n"
             f"📝 {reason_str}\n\n"
         )
@@ -2757,11 +3351,13 @@ def _format_scan_summary(underlying: str, snapshot: dict, history: list[dict],
         f"🔄 Scans: {scan_count}/5"
     )
 
-    # Build Quick Trade callback data (same format as signal trades)
+    # Build Quick Trade callback data — only when chart data is available
+    # Format: sg:t:{symbol}:BUY:{lot}:{sl}:{tp1}:{tp2}
+    # Quantity in callback = 1 lot; trade handler places 2× lots
     trade_info = None
-    if pick_entry > 0 and pick_symbol:
+    if pick_entry > 0 and pick_symbol and not no_chart:
         sym_short = pick_symbol[:20]
-        cb_trade = f"sg:t:{sym_short}:BUY:{lot}:{sl:.1f}:{tp1:.1f}"
+        cb_trade = f"sg:t:{sym_short}:BUY:{lot}:{sl:.1f}:{tp1:.1f}:{tp2:.1f}"
         cb_skip = f"sg:s:{sym_short}"
         trade_info = {
             "cb_trade": cb_trade[:64],
@@ -2774,6 +3370,13 @@ def _format_scan_summary(underlying: str, snapshot: dict, history: list[dict],
 async def hourly_scan_loop(bot_instance):
     """Background task: send trade idea scan to all followers every hour during market hours."""
     log.info("Hourly scan loop started")
+
+    # Wait for next hour boundary on startup (don't fire immediately on restart)
+    now_ist = datetime.now(IST)
+    next_hour = (now_ist + timedelta(hours=1)).replace(minute=5, second=0, microsecond=0)
+    initial_wait = max(30, (next_hour - now_ist).total_seconds())
+    log.info(f"Hourly scan: first scan in {initial_wait:.0f}s (at {next_hour.strftime('%H:%M')} IST)")
+    await asyncio.sleep(initial_wait)
 
     while state.hourly_scan_running:
         now_ist = datetime.now(IST)
@@ -2800,33 +3403,21 @@ async def hourly_scan_loop(bot_instance):
             await asyncio.sleep(3600)
             continue
 
-        for underlying in GREEKS_UNDERLYINGS:
+        # Delete previous hourly scan messages for all followers
+        for tid in follower_tids:
+            await _delete_old_scans(bot_instance, tid)
+
+        underlying_list = list(GREEKS_UNDERLYINGS.keys())
+        for i, underlying in enumerate(underlying_list):
             if not state.hourly_scan_running:
                 break
+            is_last = (i == len(underlying_list) - 1)
             try:
                 log.info(f"Hourly scan: {underlying}")
-                snapshot, chart = await asyncio.gather(
-                    asyncio.to_thread(scan_greeks_for_underlying, state.master_client, underlying),
-                    asyncio.to_thread(_get_chart_analysis, underlying),
-                )
-                if not snapshot:
-                    continue
-
-                hist = state.greeks_history.get(underlying, [])
-                text, trade_info = _format_scan_summary(underlying, snapshot, hist, chart=chart)
-                kb = None
-                if trade_info:
-                    kb = InlineKeyboardMarkup(inline_keyboard=[[
-                        InlineKeyboardButton(text="✅ Quick Trade", callback_data=trade_info["cb_trade"]),
-                        InlineKeyboardButton(text="❌ Skip", callback_data=trade_info["cb_skip"]),
-                    ]])
-
                 for tid in follower_tids:
-                    try:
-                        await bot_instance.send_message(tid, text, parse_mode="HTML", reply_markup=kb)
-                    except Exception as e:
-                        log.warning(f"Hourly scan send to {tid} failed: {e}")
-
+                    mids = await _send_scan(bot_instance, tid, underlying, last=is_last, source="hourly")
+                    if mids:
+                        state.scan_msg_ids.setdefault(tid, []).extend(mids)
             except Exception as e:
                 log.error(f"Hourly scan error for {underlying}: {e}")
 
@@ -2842,15 +3433,354 @@ async def hourly_scan_loop(bot_instance):
     log.info("Hourly scan loop stopped")
 
 
+# ── Scalp Scanner ────────────────────────────────────────────────────────────
+
+# Previous state per underlying for detecting transitions
+_scalp_prev: dict[str, dict] = {}  # underlying -> {ema20, sma50, rsi_5m, rsi_15m, ltp, ...}
+# Confirmation counter: "NIFTY:ema_cross_up" -> count (need 3 to fire)
+_scalp_confirm: dict[str, int] = {}
+_SCALP_CONFIRM_NEEDED = 5  # 5 consecutive 1-min detections before alerting
+# Global cooldown per underlying (not per signal): underlying -> timestamp
+_scalp_cooldown: dict[str, float] = {}
+_SCALP_COOLDOWN_SECS = 900  # max 1 scalp alert per underlying every 15 min
+# Direction lock per underlying: underlying -> (direction "BULLISH"|"BEARISH", timestamp)
+_scalp_dir_lock: dict[str, tuple[str, float]] = {}
+_SCALP_DIR_LOCK_SECS = 900  # 15 min — suppress opposite direction after firing
+# Daily levels cache: underlying -> {pdh, pdl, pdc, orh, orl, date}
+_scalp_daily_levels: dict[str, dict] = {}
+
+
+def _get_daily_levels(underlying: str) -> dict:
+    """Get PDH/PDL/PDC/ORH/ORL — cached per day."""
+    import yfinance as yf
+
+    today_str = datetime.now(IST).strftime("%Y-%m-%d")
+    cached = _scalp_daily_levels.get(underlying)
+    if cached and cached.get("date") == today_str:
+        return cached
+
+    yf_sym = _YF_SYMBOLS.get(underlying)
+    if not yf_sym:
+        return {}
+
+    try:
+        df = yf.download(yf_sym, period="5d", interval="15m", progress=False)
+        if df is None or df.empty:
+            return {}
+        if hasattr(df.columns, 'levels') and len(df.columns.levels) > 1:
+            df.columns = df.columns.get_level_values(0)
+        df.index = df.index.tz_localize(None) if df.index.tz is None else df.index.tz_convert(None)
+
+        dates = df.index.normalize().unique()
+        result = {"date": today_str, "pdh": 0, "pdl": 0, "pdc": 0, "orh": 0, "orl": 0}
+
+        if len(dates) >= 2:
+            prev_day = dates[-2]
+            prev_df = df[df.index.normalize() == prev_day]
+            if not prev_df.empty:
+                result["pdh"] = float(prev_df["High"].max())
+                result["pdl"] = float(prev_df["Low"].min())
+                result["pdc"] = float(prev_df["Close"].iloc[-1])
+
+        if len(dates) >= 1:
+            today_df = df[df.index.normalize() == dates[-1]]
+            if len(today_df) >= 2:
+                or_slice = today_df.iloc[:2]
+                result["orh"] = float(or_slice["High"].max())
+                result["orl"] = float(or_slice["Low"].min())
+
+        _scalp_daily_levels[underlying] = result
+        return result
+    except Exception as e:
+        log.warning(f"Scalp daily levels failed for {underlying}: {e}")
+        return {}
+
+
+def _scalp_detect_conditions(underlying: str, chart: dict, ltp: float, levels: dict) -> list[dict]:
+    """Detect active scalp conditions this scan. Returns list of signal keys + details.
+    Does NOT fire or cooldown — caller handles confirmation counting."""
+    detected = []
+    prev = _scalp_prev.get(underlying, {})
+
+    m5 = chart.get("5m", {})
+    m15 = chart.get("15m", {})
+
+    ema20 = m5.get("ema20", 0) or m15.get("ema20", 0)
+    sma50 = m5.get("sma50", 0) or m15.get("sma50", 0)
+    rsi_5m = m5.get("rsi", 50)
+
+    pdh = levels.get("pdh", 0)
+    pdl = levels.get("pdl", 0)
+    orh = levels.get("orh", 0)
+    orl = levels.get("orl", 0)
+
+    # 1. EMA20/SMA50 — need minimum 0.1% spread to count as real crossover
+    if ema20 > 0 and sma50 > 0:
+        spread_pct = abs(ema20 - sma50) / sma50 * 100
+        if spread_pct >= 0.1 and ema20 > sma50:
+            detected.append({
+                "key": "ema_cross_up",
+                "type": "EMA Cross", "emoji": "🔀", "direction": "BULLISH",
+                "message": f"EMA20 above SMA50 ({ema20:,.0f} > {sma50:,.0f}, +{spread_pct:.2f}%)",
+            })
+        elif spread_pct >= 0.1 and ema20 < sma50:
+            detected.append({
+                "key": "ema_cross_dn",
+                "type": "EMA Cross", "emoji": "🔀", "direction": "BEARISH",
+                "message": f"EMA20 below SMA50 ({ema20:,.0f} < {sma50:,.0f}, -{spread_pct:.2f}%)",
+            })
+
+    # 2. Opening Range breakout — price sustaining above/below OR
+    if orh > 0 and orl > 0:
+        if ltp > orh:
+            detected.append({
+                "key": "or_break_up",
+                "type": "OR Breakout", "emoji": "🚀", "direction": "BULLISH",
+                "message": f"Sustaining ABOVE OR High {orh:,.0f} (LTP {ltp:,.0f})",
+            })
+        elif ltp < orl:
+            detected.append({
+                "key": "or_break_dn",
+                "type": "OR Breakdown", "emoji": "💥", "direction": "BEARISH",
+                "message": f"Sustaining BELOW OR Low {orl:,.0f} (LTP {ltp:,.0f})",
+            })
+
+    # 3. PDH/PDL breakout — price sustaining above/below PD levels
+    if pdh > 0 and pdl > 0:
+        if ltp > pdh:
+            detected.append({
+                "key": "pdh_break",
+                "type": "PDH Breakout", "emoji": "🔝", "direction": "BULLISH",
+                "message": f"Sustaining ABOVE Prev Day High {pdh:,.0f} (LTP {ltp:,.0f})",
+            })
+        elif ltp < pdl:
+            detected.append({
+                "key": "pdl_break",
+                "type": "PDL Breakdown", "emoji": "🔻", "direction": "BEARISH",
+                "message": f"Sustaining BELOW Prev Day Low {pdl:,.0f} (LTP {ltp:,.0f})",
+            })
+
+    # 4. RSI extremes — currently in oversold/overbought recovery
+    if rsi_5m > 30 and rsi_5m < 40 and prev.get("rsi_5m", 50) <= 35:
+        detected.append({
+            "key": "rsi_oversold",
+            "type": "RSI Bounce", "emoji": "📈", "direction": "BULLISH",
+            "message": f"RSI 5m recovering from oversold ({rsi_5m:.0f})",
+        })
+    elif rsi_5m < 70 and rsi_5m > 60 and prev.get("rsi_5m", 50) >= 65:
+        detected.append({
+            "key": "rsi_overbought",
+            "type": "RSI Reversal", "emoji": "📉", "direction": "BEARISH",
+            "message": f"RSI 5m cooling from overbought ({rsi_5m:.0f})",
+        })
+
+    # 5. S/R touch + bounce — price near S/R
+    cfg = GREEKS_UNDERLYINGS.get(underlying, {})
+    idx_data = state.index_data.get(cfg.get("index_token", ""), {})
+    underlying_ltp = float(idx_data.get("value", idx_data.get("ltp", idx_data.get("lastTradedPrice", 0))) or 0)
+    prev_ltp = prev.get("ltp", 0)
+
+    if underlying_ltp > 0 and prev_ltp > 0 and state.master_client:
+        try:
+            snapshot = scan_greeks_for_underlying(state.master_client, underlying)
+            if snapshot:
+                oi_snap = _snapshot_to_oi(underlying, snapshot, underlying_ltp)
+                support, resistance = find_support_resistance(oi_snap)
+                threshold = underlying_ltp * 0.0015
+
+                if support > 0 and abs(ltp - support) < threshold and ltp > prev_ltp:
+                    detected.append({
+                        "key": "sr_bounce_up",
+                        "type": "S/R Bounce", "emoji": "🛡️", "direction": "BULLISH",
+                        "message": f"Holding at Support {support:,.0f} (LTP {ltp:,.0f})",
+                    })
+                elif resistance > 0 and abs(ltp - resistance) < threshold and ltp < prev_ltp:
+                    detected.append({
+                        "key": "sr_reject_dn",
+                        "type": "S/R Reject", "emoji": "🧱", "direction": "BEARISH",
+                        "message": f"Rejected at Resistance {resistance:,.0f} (LTP {ltp:,.0f})",
+                    })
+        except Exception:
+            pass
+
+    # Update previous state
+    _scalp_prev[underlying] = {
+        "ema20": ema20, "sma50": sma50,
+        "rsi_5m": rsi_5m,
+        "ltp": ltp,
+    }
+
+    return detected
+
+
+async def scalp_scan_loop(bot_instance):
+    """Background task: scan every 1 min, confirm 3 consecutive times before alerting."""
+    log.info("Scalp scanner started")
+
+    warmup_done = False
+
+    while state.scalp_running:
+        now_ist = datetime.now(IST)
+
+        if now_ist.weekday() >= 5:
+            await asyncio.sleep(60)
+            continue
+
+        market_start = now_ist.replace(hour=9, minute=16, second=0, microsecond=0)
+        market_end = now_ist.replace(hour=15, minute=25, second=0, microsecond=0)
+        if now_ist < market_start or now_ist > market_end:
+            await asyncio.sleep(30)
+            warmup_done = False
+            _scalp_prev.clear()
+            _scalp_confirm.clear()
+            _scalp_dir_lock.clear()
+            continue
+
+        if not state.master_client:
+            await asyncio.sleep(30)
+            continue
+
+        config = _read_config()
+        follower_tids = [f.get("telegram_id") for f in config.get("followers", []) if f.get("telegram_id")]
+        master_tid = config.get("master", {}).get("telegram_id")
+        alert_tids = follower_tids + ([master_tid] if master_tid else [])
+
+        if not alert_tids:
+            await asyncio.sleep(60)
+            continue
+
+        for underlying in GREEKS_UNDERLYINGS:
+            if not state.scalp_running:
+                break
+            try:
+                cfg = GREEKS_UNDERLYINGS[underlying]
+                idx_data = state.index_data.get(cfg["index_token"], {})
+                ltp = float(idx_data.get("value", idx_data.get("ltp", idx_data.get("lastTradedPrice", 0))) or 0)
+                if ltp <= 0:
+                    continue
+
+                chart = await asyncio.to_thread(_get_chart_analysis, underlying)
+                if not chart:
+                    continue
+
+                levels = await asyncio.to_thread(_get_daily_levels, underlying)
+
+                if not warmup_done:
+                    m5 = chart.get("5m", {})
+                    m15 = chart.get("15m", {})
+                    _scalp_prev[underlying] = {
+                        "ema20": m5.get("ema20", 0) or m15.get("ema20", 0),
+                        "sma50": m5.get("sma50", 0) or m15.get("sma50", 0),
+                        "rsi_5m": m5.get("rsi", 50),
+                        "ltp": ltp,
+                    }
+                    continue
+
+                # Detect conditions this scan
+                detected = _scalp_detect_conditions(underlying, chart, ltp, levels)
+                detected_keys = {d["key"] for d in detected}
+
+                # Increment counters for detected conditions, reset missing ones
+                all_keys = {"ema_cross_up", "ema_cross_dn", "or_break_up", "or_break_dn",
+                            "pdh_break", "pdl_break", "rsi_oversold", "rsi_overbought",
+                            "sr_bounce_up", "sr_reject_dn"}
+                for key in all_keys:
+                    full_key = f"{underlying}:{key}"
+                    if key in detected_keys:
+                        _scalp_confirm[full_key] = _scalp_confirm.get(full_key, 0) + 1
+                    else:
+                        _scalp_confirm[full_key] = 0  # reset — condition gone
+
+                # Fire the BEST confirmed signal (only 1 per underlying per cycle)
+                now_ts = time.time()
+
+                # Global cooldown — max 1 alert per underlying every 15 min
+                last_global = _scalp_cooldown.get(underlying, 0)
+                if (now_ts - last_global) < _SCALP_COOLDOWN_SECS:
+                    continue  # this underlying is on cooldown
+
+                # Direction lock — check once
+                lock = _scalp_dir_lock.get(underlying)
+                locked_dir = None
+                if lock and (now_ts - lock[1]) < _SCALP_DIR_LOCK_SECS:
+                    locked_dir = lock[0]
+
+                # Find best confirmed signal (highest confirmation count)
+                best_det = None
+                best_count = 0
+                for det in detected:
+                    full_key = f"{underlying}:{det['key']}"
+                    count = _scalp_confirm.get(full_key, 0)
+                    if count < _SCALP_CONFIRM_NEEDED:
+                        continue
+                    if locked_dir and det["direction"] != locked_dir:
+                        continue  # opposite direction locked
+                    if count > best_count:
+                        best_count = count
+                        best_det = det
+
+                if not best_det:
+                    continue
+
+                # Fire only the best one
+                full_key = f"{underlying}:{best_det['key']}"
+                _scalp_cooldown[underlying] = now_ts
+                _scalp_confirm[full_key] = 0
+                _scalp_dir_lock[underlying] = (best_det["direction"], now_ts)
+                det = best_det
+
+                now_str = now_ist.strftime("%H:%M")
+                dir_emoji = "🟢" if det["direction"] == "BULLISH" else "🔴"
+                text = (
+                    f"⚡ <b>SCALP {underlying}</b> — {now_str} IST\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"{det['emoji']} <b>{det['type']}</b> {dir_emoji} {det['direction']}\n"
+                    f"{det['message']}\n"
+                    f"LTP: {ltp:,.1f} | Confirmed {_SCALP_CONFIRM_NEEDED}x\n"
+                )
+
+                for tid in alert_tids:
+                    try:
+                        msg = await bot_instance.send_message(tid, text, parse_mode="HTML")
+                        state.scalp_msg_ids.setdefault(tid, []).append(msg.message_id)
+                        if len(state.scalp_msg_ids[tid]) > 20:
+                            old_id = state.scalp_msg_ids[tid].pop(0)
+                            try:
+                                await bot_instance.delete_message(tid, old_id)
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        log.warning(f"Scalp alert send failed for {tid}: {e}")
+
+                log.info(f"Scalp CONFIRMED: {underlying} {det['key']} ({det['direction']})")
+
+            except Exception as e:
+                log.error(f"Scalp scan error for {underlying}: {e}")
+
+        if not warmup_done:
+            warmup_done = True
+            log.info("Scalp scanner warmup complete — confirming signals")
+
+        await asyncio.sleep(60)  # 1 minute
+
+    log.info("Scalp scanner stopped")
+
+
 def generate_greeks_signals(underlying: str, snapshot: dict, history: list[dict] | None = None,
                             chart_score: int = 0) -> list[dict]:
     """Generate trade signals from Greeks snapshot. Returns list of signal dicts.
     Requires 3+ scans in history for momentum confirmation (6-layer signal confirmation).
     No conflicting CE+PE buy signals — pick the stronger direction only.
-    chart_score: -100..+100 from TradingView. Vetoes signals opposing the chart."""
+    chart_score: -100..+100 from TradingView. Vetoes signals opposing the chart.
+    chart_score=0 with no chart data → no signals (chart required)."""
     cfg = GREEKS_UNDERLYINGS[underlying]
     atm = _get_atm_strike(underlying, cfg)
     if atm is None:
+        return []
+
+    # No signals without chart confirmation
+    if chart_score == 0:
+        log.info(f"Greeks signals: skipping {underlying} (no chart data)")
         return []
 
     history = history or []
@@ -3067,11 +3997,11 @@ async def send_signal_to_telegram(bot_instance, signal: dict):
         max_loss = round((sl - entry) * qty, 2)
         max_profit = round((entry - tp) * qty, 2)
 
-    emoji = "🟢" if signal["direction"] == "BUY" else "🔴"
+    emoji = "🟢" if signal["opt_type"] == "CE" else "🔴"
     reason_str = " + ".join(signal["reasons"][:3]) if signal["reasons"] else "Greeks alignment"
 
     text = (
-        f"📊 <b>{signal['underlying']} Signal ({signal['confidence']}% confidence)</b>\n\n"
+        f"🎯 <b>{signal['underlying']} Signal ({signal['confidence']}% confidence)</b>\n\n"
         f"{emoji} <b>{signal['direction']} {signal['symbol']}</b>\n"
         f"Entry: ₹{entry:.2f} | Qty: {qty} (1 lot)\n"
         f"SL: ₹{sl:.2f} (-{sl_pct}%) | TP: ₹{tp:.2f} (+{tp_pct}%)\n"
@@ -3095,14 +4025,16 @@ async def send_signal_to_telegram(bot_instance, signal: dict):
         ]
     ])
 
-    # Send to all followers
+    # Delete old messages then send to all followers
     config = _read_config()
     sent = 0
     for f in config.get("followers", []):
         tid = f.get("telegram_id")
         if tid:
             try:
-                await bot_instance.send_message(tid, text, parse_mode="HTML", reply_markup=kb)
+                await _delete_old_scans(bot_instance, tid)
+                sig_msg = await bot_instance.send_message(tid, text, parse_mode="HTML", reply_markup=kb)
+                state.scan_msg_ids[tid] = [sig_msg.message_id]
                 sent += 1
             except Exception as e:
                 log.warning(f"Signal send to {tid} failed: {e}")
@@ -3190,16 +4122,18 @@ async def cb_signal_trade(cb: CallbackQuery):
     """Handle Quick Trade button click — place order on follower's account."""
     try:
         parts = cb.data.split(":")
-        # sg:t:{symbol}:{txn}:{qty}:{sl}:{tp}
+        # sg:t:{symbol}:{txn}:{lot}:{sl}:{tp1}:{tp2}
         if len(parts) < 7:
             await cb.answer("Invalid signal data", show_alert=True)
             return
 
         symbol = parts[2]
         txn_type = parts[3]  # BUY or SELL
-        qty = int(parts[4])
+        qty = int(parts[4])  # 1 lot size
         sl_price = float(parts[5])
-        tp_price = float(parts[6])
+        tp1_price = float(parts[6])
+        tp2_price = float(parts[7]) if len(parts) > 7 else tp1_price  # fallback
+        total_qty = qty * 2  # 2 lots
 
         # Find the follower client for this user
         user_tid = cb.from_user.id
@@ -3255,23 +4189,23 @@ async def cb_signal_trade(cb: CallbackQuery):
 
         await cb.answer("Placing order...", show_alert=False)
 
-        # Build a synthetic order dict — same format as copy trading uses
+        # Build a synthetic order dict — 2 lots
         exchange_str = "BSE" if "SENSEX" in symbol else "NSE"
         order = {
             "trading_symbol": symbol,
-            "quantity": qty,
+            "quantity": total_qty,
             "order_type": "MARKET",
             "transaction_type": txn_type,
             "exchange": exchange_str,
             "segment": "FNO",
-            "product": "MIS",
+            "product": "NRML",
             "price": 0,
             "trigger_price": 0,
         }
 
-        # Place main order using same logic as copy trading
+        # Place main order — 2 lots
         try:
-            log.info(f"Quick Trade: placing {txn_type} {qty}x {symbol} for {account_name}")
+            log.info(f"Quick Trade: placing {txn_type} {total_qty}x {symbol} (2 lots) for {account_name}")
             resp = await asyncio.to_thread(
                 copy_order_to_follower, client, fc, order
             )
@@ -3288,73 +4222,132 @@ async def cb_signal_trade(cb: CallbackQuery):
 
             oid = resp.get("groww_order_id", "unknown")
 
-            # Place OCO smart order (SL + TP as one unit — Groww cancels the other automatically)
+            # Place 2 OCO orders — one per lot with different TPs, same SL
             opposite_txn = "SELL" if txn_type == "BUY" else "BUY"
-            oco_resp = None
-            oco_id = "failed"
-
             exchange_const = client.EXCHANGE_BSE if exchange_str == "BSE" else client.EXCHANGE_NSE
+            net_pos = total_qty if txn_type == "BUY" else -total_qty
+
+            sl_trigger = round(sl_price / 0.05) * 0.05
+            sl_limit_price = round((sl_price * 0.95 if opposite_txn == "SELL" else sl_price * 1.05) / 0.05) * 0.05
+
+            oco1_id = "failed"
+            oco2_id = "failed"
+
+            # OCO #1: Lot 1 exits at TP1
             try:
-                oco_resp = await asyncio.to_thread(
+                tp1_tick = round(tp1_price / 0.05) * 0.05
+                oco1_resp = await asyncio.to_thread(
                     client.create_smart_order,
                     smart_order_type=client.SMART_ORDER_TYPE_OCO,
                     segment=client.SEGMENT_FNO,
                     trading_symbol=symbol,
                     quantity=qty,
-                    product_type=client.PRODUCT_MIS,
+                    product_type=client.PRODUCT_NRML,
                     exchange=exchange_const,
                     duration=client.VALIDITY_DAY,
                     transaction_type=opposite_txn,
-                    net_position_quantity=qty if txn_type == "BUY" else -qty,
+                    net_position_quantity=net_pos,
                     target={
-                        "trigger_price": f"{tp_price:.2f}",
+                        "trigger_price": f"{tp1_tick:.2f}",
                         "order_type": "LIMIT",
-                        "price": f"{tp_price:.2f}",
+                        "price": f"{tp1_tick:.2f}",
                     },
                     stop_loss={
-                        "trigger_price": f"{sl_price:.2f}",
-                        "order_type": "STOP_LOSS",
-                        "price": f"{sl_price * 0.95:.2f}" if opposite_txn == "SELL" else f"{sl_price * 1.05:.2f}",
+                        "trigger_price": f"{sl_trigger:.2f}",
+                        "order_type": "SL",
+                        "price": f"{sl_limit_price:.2f}",
                     },
                 )
-                oco_id = oco_resp.get("smart_order_id", oco_resp.get("id", "unknown")) if oco_resp else "failed"
-                log.info(f"OCO placed for {symbol}: {oco_resp}")
-            except Exception as oco_err:
-                log.warning(f"OCO order failed for {symbol}: {oco_err}, falling back to separate SL")
-                # Fallback: place SL only (no TP) — SL-M blocked for BSE options
-                sl_limit = sl_price * 0.95 if opposite_txn == "SELL" else sl_price * 1.05
+                oco1_id = oco1_resp.get("smart_order_id", oco1_resp.get("id", "unknown")) if oco1_resp else "failed"
+                log.info(f"OCO #1 (TP1) placed for {symbol}: {oco1_resp}")
+            except Exception as oco1_err:
+                log.warning(f"OCO #1 failed for {symbol}: {oco1_err}")
+
+            # OCO #2: Lot 2 exits at TP2
+            try:
+                tp2_tick = round(tp2_price / 0.05) * 0.05
+                oco2_resp = await asyncio.to_thread(
+                    client.create_smart_order,
+                    smart_order_type=client.SMART_ORDER_TYPE_OCO,
+                    segment=client.SEGMENT_FNO,
+                    trading_symbol=symbol,
+                    quantity=qty,
+                    product_type=client.PRODUCT_NRML,
+                    exchange=exchange_const,
+                    duration=client.VALIDITY_DAY,
+                    transaction_type=opposite_txn,
+                    net_position_quantity=net_pos,
+                    target={
+                        "trigger_price": f"{tp2_tick:.2f}",
+                        "order_type": "LIMIT",
+                        "price": f"{tp2_tick:.2f}",
+                    },
+                    stop_loss={
+                        "trigger_price": f"{sl_trigger:.2f}",
+                        "order_type": "SL",
+                        "price": f"{sl_limit_price:.2f}",
+                    },
+                )
+                oco2_id = oco2_resp.get("smart_order_id", oco2_resp.get("id", "unknown")) if oco2_resp else "failed"
+                log.info(f"OCO #2 (TP2) placed for {symbol}: {oco2_resp}")
+            except Exception as oco2_err:
+                log.warning(f"OCO #2 failed for {symbol}: {oco2_err}")
+
+            # Fallback: if both OCOs failed, place single SL for full qty
+            if oco1_id == "failed" and oco2_id == "failed":
+                log.warning(f"Both OCOs failed for {symbol}, falling back to SL for full {total_qty}")
                 sl_order = {
                     "trading_symbol": symbol,
-                    "quantity": qty,
+                    "quantity": total_qty,
                     "order_type": "SL",
                     "transaction_type": opposite_txn,
                     "exchange": exchange_str,
                     "segment": "FNO",
-                    "product": "MIS",
-                    "price": round(sl_limit, 2),
-                    "trigger_price": sl_price,
+                    "product": "NRML",
+                    "price": round(sl_limit_price, 2),
+                    "trigger_price": round(sl_trigger, 2),
                 }
                 try:
                     sl_resp = await asyncio.to_thread(
                         copy_order_to_follower, client, fc, sl_order
                     )
-                    oco_id = f"SL-only: {sl_resp.get('groww_order_id', 'failed')}" if sl_resp else "SL-failed"
+                    oco1_id = f"SL-only: {sl_resp.get('groww_order_id', 'failed')}" if sl_resp else "SL-failed"
                 except Exception:
-                    oco_id = "SL-failed"
+                    oco1_id = "SL-failed"
+            # If only OCO #1 failed, place SL for lot 1
+            elif oco1_id == "failed":
+                sl_order = {
+                    "trading_symbol": symbol, "quantity": qty, "order_type": "SL",
+                    "transaction_type": opposite_txn, "exchange": exchange_str,
+                    "segment": "FNO", "product": "MIS",
+                    "price": round(sl_limit_price, 2), "trigger_price": round(sl_trigger, 2),
+                }
+                try:
+                    sl_resp = await asyncio.to_thread(copy_order_to_follower, client, fc, sl_order)
+                    oco1_id = f"SL-only: {sl_resp.get('groww_order_id', 'failed')}" if sl_resp else "SL-failed"
+                except Exception:
+                    oco1_id = "SL-failed"
 
             result_text = (
                 f"✅ <b>Order Placed!</b>\n\n"
-                f"Main: {txn_type} {qty}x {symbol}\n"
-                f"Order ID: <code>{oid}</code>\n"
-                f"OCO: SL ₹{sl_price:.1f} / TP ₹{tp_price:.1f}\n"
-                f"OCO ID: <code>{oco_id}</code>"
+                f"BUY {total_qty}x {symbol} (2 lots)\n"
+                f"Order ID: <code>{oid}</code>\n\n"
+                f"Lot 1: TP1 ₹{tp1_price:.1f} / SL ₹{sl_price:.1f}\n"
+                f"OCO #1: <code>{oco1_id}</code>\n"
+                f"Lot 2: TP2 ₹{tp2_price:.1f} / SL ₹{sl_price:.1f}\n"
+                f"OCO #2: <code>{oco2_id}</code>"
             )
-            await cb.message.reply(result_text, parse_mode="HTML")
+            # Exit button: sg:x:{symbol}:{opposite_txn}:{total_qty}:{exchange}
+            exit_cb = f"sg:x:{symbol[:20]}:{opposite_txn}:{total_qty}:{exchange_str}"
+            exit_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="🚪 Exit Trade Now", callback_data=exit_cb[:64]),
+            ]])
+            await cb.message.reply(result_text, parse_mode="HTML", reply_markup=exit_kb)
 
             state.add_log(
-                f"Quick Trade: {txn_type} {qty}x {symbol}",
+                f"Quick Trade: {txn_type} {total_qty}x {symbol} (2 lots)",
                 symbol=symbol, follower=account_name, status="success",
-                details=f"OID={oid}, OCO={oco_id}",
+                details=f"OID={oid}, OCO1={oco1_id}, OCO2={oco2_id}",
             )
 
         except Exception as e:
@@ -3456,6 +4449,10 @@ async def lifespan(app: FastAPI):
         state.hourly_scan_task = asyncio.create_task(hourly_scan_loop(bot))
         log.info("Hourly scan loop started")
 
+        state.scalp_running = True
+        state.scalp_task = asyncio.create_task(scalp_scan_loop(bot))
+        log.info("Scalp scanner started")
+
     yield
 
     state.running = False
@@ -3474,6 +4471,10 @@ async def lifespan(app: FastAPI):
     state.hourly_scan_running = False
     if state.hourly_scan_task and not state.hourly_scan_task.done():
         state.hourly_scan_task.cancel()
+    # Stop scalp scanner
+    state.scalp_running = False
+    if state.scalp_task and not state.scalp_task.done():
+        state.scalp_task.cancel()
     if dp and bot:
         await dp.stop_polling()
         await bot.session.close()
