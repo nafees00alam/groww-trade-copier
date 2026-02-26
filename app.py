@@ -25,7 +25,7 @@ from growwapi import GrowwAPI, GrowwFeed
 
 
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -347,8 +347,14 @@ async def cmd_scan(message: Message):
                 continue
 
             hist = state.greeks_history.get(underlying, [])
-            text = _format_scan_summary(underlying, snapshot, hist, chart=chart)
-            await message.answer(text, parse_mode="HTML")
+            text, trade_info = _format_scan_summary(underlying, snapshot, hist, chart=chart)
+            kb = None
+            if trade_info:
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="✅ Quick Trade", callback_data=trade_info["cb_trade"]),
+                    InlineKeyboardButton(text="❌ Skip", callback_data=trade_info["cb_skip"]),
+                ]])
+            await message.answer(text, parse_mode="HTML", reply_markup=kb)
         except Exception as e:
             log.error(f"Scan command error for {underlying}: {e}")
             await message.answer(f"{underlying}: Scan failed — {e}")
@@ -2750,7 +2756,19 @@ def _format_scan_summary(underlying: str, snapshot: dict, history: list[dict],
         f"↔️ Alt: {alt} {alt_score}/100 @ {alt_strike}\n"
         f"🔄 Scans: {scan_count}/5"
     )
-    return text
+
+    # Build Quick Trade callback data (same format as signal trades)
+    trade_info = None
+    if pick_entry > 0 and pick_symbol:
+        sym_short = pick_symbol[:20]
+        cb_trade = f"sg:t:{sym_short}:BUY:{lot}:{sl:.1f}:{tp1:.1f}"
+        cb_skip = f"sg:s:{sym_short}"
+        trade_info = {
+            "cb_trade": cb_trade[:64],
+            "cb_skip": cb_skip[:64],
+        }
+
+    return text, trade_info
 
 
 async def hourly_scan_loop(bot_instance):
@@ -2795,11 +2813,17 @@ async def hourly_scan_loop(bot_instance):
                     continue
 
                 hist = state.greeks_history.get(underlying, [])
-                text = _format_scan_summary(underlying, snapshot, hist, chart=chart)
+                text, trade_info = _format_scan_summary(underlying, snapshot, hist, chart=chart)
+                kb = None
+                if trade_info:
+                    kb = InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="✅ Quick Trade", callback_data=trade_info["cb_trade"]),
+                        InlineKeyboardButton(text="❌ Skip", callback_data=trade_info["cb_skip"]),
+                    ]])
 
                 for tid in follower_tids:
                     try:
-                        await bot_instance.send_message(tid, text, parse_mode="HTML")
+                        await bot_instance.send_message(tid, text, parse_mode="HTML", reply_markup=kb)
                     except Exception as e:
                         log.warning(f"Hourly scan send to {tid} failed: {e}")
 
@@ -3400,6 +3424,10 @@ async def lifespan(app: FastAPI):
             bot = Bot(token=bot_token)
             dp = Dispatcher()
             dp.include_router(tg_router)
+            await bot.set_my_commands([
+                BotCommand(command="scan", description="Scan market — Greeks + Chart analysis"),
+                BotCommand(command="login", description="Get dashboard login link"),
+            ])
             bot_task = asyncio.create_task(dp.start_polling(bot))
             state.bot_instance = bot
             log.info("Telegram bot started")
