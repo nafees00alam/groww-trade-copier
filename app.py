@@ -2598,14 +2598,21 @@ def _format_scan_summary(underlying: str, snapshot: dict, history: list[dict],
         if pe_score > best_pe_score:
             best_pe_score, best_pe_strike, best_pe_reasons, best_pe_data = pe_score, strike, pe_reasons, data
 
-    # Apply chart alignment bonus/penalty to Greeks scores
-    # Chart bullish → boost CE, penalize PE (and vice versa)
-    if chart_score > 0:  # Chart bullish
-        best_ce_score = min(100, best_ce_score + chart_score // 5)
-        best_pe_score = max(0, best_pe_score - chart_score // 8)
-    elif chart_score < 0:  # Chart bearish
-        best_pe_score = min(100, best_pe_score + abs(chart_score) // 5)
-        best_ce_score = max(0, best_ce_score - abs(chart_score) // 8)
+    # Apply chart alignment — HARD VETO for strong bias, else moderate adjustment
+    if chart_score <= -50:
+        # Strong bearish chart: kill CE, heavily boost PE
+        best_ce_score = 0
+        best_pe_score = min(100, best_pe_score + abs(chart_score) // 3)
+    elif chart_score >= 50:
+        # Strong bullish chart: kill PE, heavily boost CE
+        best_pe_score = 0
+        best_ce_score = min(100, best_ce_score + chart_score // 3)
+    elif chart_score > 0:
+        best_ce_score = min(100, best_ce_score + chart_score // 4)
+        best_pe_score = max(0, best_pe_score - chart_score // 6)
+    elif chart_score < 0:
+        best_pe_score = min(100, best_pe_score + abs(chart_score) // 4)
+        best_ce_score = max(0, best_ce_score - abs(chart_score) // 6)
 
     # Pick the stronger direction for trade idea
     if best_ce_score >= best_pe_score and best_ce_score > 0:
