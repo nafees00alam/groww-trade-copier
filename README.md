@@ -65,7 +65,14 @@ config.json             # Master/follower credentials + settings
 
 ## Docs
 
-See the [Wiki](https://github.com/nafees00alam/groww-trade-copier/wiki) for setup guide, configuration, API reference, deployment, and architecture details.
+- [Setup Guide](docs/Setup-Guide.md)
+- [Configuration](docs/Configuration.md)
+- [Architecture](docs/Architecture.md)
+- [API Reference](docs/API-Reference.md)
+- [Scanners & Signals](docs/Scanners-&-Signals.md)
+- [Auto Recovery](docs/Auto-Recovery.md)
+- [Deployment](docs/Deployment.md)
+- [Telegram Bot](docs/Telegram-Bot.md)
 
 ## Disclaimer
 
